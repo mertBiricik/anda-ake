@@ -2,20 +2,56 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-
-// 1. Import the new package
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-// Background message handler
+// THIS IS THE KEY CHANGE!
+// We now make the background handler call the same 'showLocalNotification' function.
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   print("✅ Handling a background message: ${message.messageId}");
+
+  // Create an instance of the plugin (required for background isolates)
+  final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+  // Call the function to show the notification
+  showLocalNotification(message, _flutterLocalNotificationsPlugin);
 }
 
-// 2. Create a global instance of the plugin
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-FlutterLocalNotificationsPlugin();
+// Global instance for the main app isolate
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  'sar_channel_critical',
+  'CRITICAL SAR ALERTS',
+  description: 'This channel is used for critical search and rescue alerts.',
+  importance: Importance.max,
+  playSound: true,
+  sound: RawResourceAndroidNotificationSound('alarm'),
+);
+
+// We turn showLocalNotification into a top-level function so it can be called from the background.
+// It now accepts the plugin instance as an argument.
+void showLocalNotification(RemoteMessage message, FlutterLocalNotificationsPlugin pluginInstance) async {
+  // If we are using a data-only message, the 'notification' property will be null.
+  // We need to get the title and body from the 'data' payload instead.
+  String title = message.data['title'] ?? message.notification?.title ?? 'No Title';
+  String body = message.data['body'] ?? message.notification?.body ?? 'No Body';
+
+  await pluginInstance.show(
+    message.hashCode,
+    title,
+    body,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        channel.id,
+        channel.name,
+        channelDescription: channel.description,
+        icon: '@mipmap/ic_launcher',
+      ),
+    ),
+  );
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,16 +59,15 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // 3. Initialize the plugin
-  // The '@mipmap/ic_launcher' refers to the default app icon in the 'android/app/src/main/res' folders.
-  const AndroidInitializationSettings initializationSettingsAndroid =
-  AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initializationSettings =
-  InitializationSettings(android: initializationSettingsAndroid);
+  const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  await flutterLocalNotificationsPlugin
+  .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+  ?.createNotificationChannel(channel);
 
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(const MyApp());
 }
 
@@ -58,48 +93,19 @@ class _MyHomePageState extends State<MyHomePage> {
     setupFcm();
   }
 
-  // 4. Create the function that will build and show the notification
-  void showLocalNotification(RemoteMessage message) async {
-    final notification = message.notification;
-    if (notification == null) return;
-
-    // This part is where we define the 'look' of the notification.
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-    AndroidNotificationDetails(
-      'sar_channel_id', // A unique channel ID
-      'SAR Alerts', // A user-visible channel name for the settings
-      channelDescription: 'Channel for critical SAR alerts',
-      importance: Importance.max, // Set the importance to the highest level
-      priority: Priority.high, // Set the priority to high
-      showWhen: true,
-    );
-
-    const NotificationDetails platformChannelSpecifics =
-    NotificationDetails(android: androidPlatformChannelSpecifics);
-
-    // This command actually shows the notification
-    await flutterLocalNotificationsPlugin.show(
-      notification.hashCode, // A unique ID for this specific notification
-      notification.title,
-      notification.body,
-      platformChannelSpecifics,
-    );
-  }
-
   void setupFcm() async {
     final fcm = FirebaseMessaging.instance;
     await fcm.requestPermission();
     final token = await fcm.getToken();
     print("✅✅✅ FCM Token: $token ✅✅✅");
 
-    // 5. THIS IS THE KEY CHANGE: Call our new function from the foreground listener
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('Got a message whilst in the foreground!');
-      showLocalNotification(message); // <-- This is the new, important part
+      // The foreground handler now calls the top-level function, passing its own plugin instance.
+      showLocalNotification(message, flutterLocalNotificationsPlugin);
     });
   }
 
-  // The UI build method can be simpler now
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -107,16 +113,7 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
       ),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text(
-            'ANDA-AKE is running.\nReady to receive notifications!',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 18),
-          ),
-        ),
-      ),
+      body: const Center( /* ... UI code ... */ ),
     );
   }
 }
