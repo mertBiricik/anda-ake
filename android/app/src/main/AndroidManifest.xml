@@ -4,13 +4,16 @@
     <!-- NEW PERMISSIONS (Step 2 of the instructions)                        -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- =================================================================== -->
-
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <application
         android:label="ANDA AKE"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""

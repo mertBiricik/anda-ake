@@ -4,22 +4,14 @@ import 'firebase_options.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-// THIS IS THE KEY CHANGE!
-// We now make the background handler call the same 'showLocalNotification' function.
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  print("✅ Handling a background message: ${message.messageId}");
+// Import your new alarm screen
+import 'alarm_screen.dart';
 
-  // Create an instance of the plugin (required for background isolates)
-  final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+// 1. Create a GlobalKey to access the Navigator from anywhere (even outside the UI tree)
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-  // Call the function to show the notification
-  showLocalNotification(message, _flutterLocalNotificationsPlugin);
-}
-
-// Global instance for the main app isolate
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+FlutterLocalNotificationsPlugin();
 
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
   'sar_channel_critical',
@@ -27,16 +19,26 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
   description: 'This channel is used for critical search and rescue alerts.',
   importance: Importance.max,
   playSound: true,
-  sound: RawResourceAndroidNotificationSound('alarm'),
+  sound: RawResourceAndroidNotificationSound('alarm'), // Plays the sound once for the notification
 );
 
-// We turn showLocalNotification into a top-level function so it can be called from the background.
-// It now accepts the plugin instance as an argument.
+// Background handler
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  print("✅ Handling a background message: ${message.messageId}");
+
+  // We must create a new instance of the plugin for the background isolate
+  final FlutterLocalNotificationsPlugin backgroundPlugin = FlutterLocalNotificationsPlugin();
+
+  // Call the helper to show the notification
+  showLocalNotification(message, backgroundPlugin);
+}
+
+// Top-level function to show the notification
 void showLocalNotification(RemoteMessage message, FlutterLocalNotificationsPlugin pluginInstance) async {
-  // If we are using a data-only message, the 'notification' property will be null.
-  // We need to get the title and body from the 'data' payload instead.
-  String title = message.data['title'] ?? message.notification?.title ?? 'No Title';
-  String body = message.data['body'] ?? message.notification?.body ?? 'No Body';
+  String title = message.data['title'] ?? message.notification?.title ?? 'CRITICAL ALERT';
+  String body = message.data['body'] ?? message.notification?.body ?? 'Emergency assistance required.';
 
   await pluginInstance.show(
     message.hashCode,
@@ -48,8 +50,21 @@ void showLocalNotification(RemoteMessage message, FlutterLocalNotificationsPlugi
         channel.name,
         channelDescription: channel.description,
         icon: '@mipmap/ic_launcher',
+        priority: Priority.high,
+        importance: Importance.max,
+
+        // 🚨 THIS IS THE MAGIC 🚨
+        // This tells Android to try and launch the app immediately (Full Screen Intent)
+        // If the screen is locked, this is what triggers the "Wake Up" behavior
+        fullScreenIntent: true,
+
+        // Keep the notification visible until acknowledged
+        ongoing: true,
+        autoCancel: false,
       ),
     ),
+    // We pass the body as the payload so the AlarmScreen can display it
+    payload: body,
   );
 }
 
@@ -59,29 +74,55 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  const AndroidInitializationSettings initializationSettingsAndroid =
+  AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initializationSettings =
+  InitializationSettings(android: initializationSettingsAndroid);
+
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    // 2. Handle what happens when the user taps the notification
+    onDidReceiveNotificationResponse: (NotificationResponse response) {
+      if (response.payload != null) {
+        // Navigate to the Alarm Screen using the global key
+        navigatorKey.currentState?.pushNamed('/alarm', arguments: response.payload);
+      }
+    },
+  );
 
   await flutterLocalNotificationsPlugin
   .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
   ?.createNotificationChannel(channel);
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      // 3. Assign the navigator key
+      navigatorKey: navigatorKey,
       title: 'ANDA AKE',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'ANDA AKE'),
+      // 4. Define the Routes
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const MyHomePage(title: 'ANDA AKE Home'),
+        '/alarm': (context) {
+          // Extract the message passed from the notification
+          final message = ModalRoute.of(context)!.settings.arguments as String? ?? "CRITICAL MISSION";
+          return AlarmScreen(missionMessage: message);
+        },
+      },
     );
   }
 }
@@ -99,21 +140,21 @@ class _MyHomePageState extends State<MyHomePage> {
     final token = await fcm.getToken();
     print("✅✅✅ FCM Token: $token ✅✅✅");
 
+    // Handle Foreground Messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('Got a message whilst in the foreground!');
-      // The foreground handler now calls the top-level function, passing its own plugin instance.
-      showLocalNotification(message, flutterLocalNotificationsPlugin);
+
+      // For foreground, we don't need a notification; we just go straight to the screen!
+      String body = message.data['body'] ?? "Emergency Alert";
+      navigatorKey.currentState?.pushNamed('/alarm', arguments: body);
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
-      ),
-      body: const Center( /* ... UI code ... */ ),
+      appBar: AppBar(title: Text(widget.title)),
+      body: const Center(child: Text("Ready for alerts.")),
     );
   }
 }
