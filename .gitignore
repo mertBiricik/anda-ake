@@ -72,3 +72,5 @@ build/
 # Custom files
 # If you have any other local configuration or secret files, add them here.
 alarm.mp3
+.flutter-plugins-dependencies
+.flutter-plugins
