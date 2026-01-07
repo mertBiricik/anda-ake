@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "951408369897",
+    "project_id": "anda-ake",
+    "storage_bucket": "anda-ake.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:951408369897:android:67d6000ca0aedf17015078",
+        "android_client_info": {
+          "package_name": "com.andaake.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZk7_srU7jIa9dXqkwSoIcBagPER2OEzE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

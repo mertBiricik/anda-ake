@@ -1,0 +1,66 @@
+Resolving dependencies...
+Downloading packages...
+  _flutterfire_internals 1.3.64 (1.3.65 available)
+  characters 1.4.0 (1.4.1 available)
+  firebase_core 4.2.1 (4.3.0 available)
+  firebase_core_web 3.3.0 (3.3.1 available)
+  firebase_messaging 16.0.4 (16.1.0 available)
+  firebase_messaging_platform_interface 4.7.4 (4.7.5 available)
+  firebase_messaging_web 4.1.0 (4.1.1 available)
+  flutter_lints 5.0.0 (6.0.0 available)
+  http 1.5.0 (1.6.0 available)
+  lints 5.1.1 (6.0.0 available)
+  matcher 0.12.17 (0.12.18 available)
+  material_color_utilities 0.11.1 (0.13.0 available)
+  meta 1.16.0 (1.17.0 available)
+  path_provider_android 2.2.20 (2.2.22 available)
+  path_provider_foundation 2.4.3 (2.5.1 available)
+  test_api 0.7.6 (0.7.8 available)
+Got dependencies!
+16 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib/main.dart on sdk gphone64 x86 64 in debug mode...
+Running Gradle task 'assembleDebug'...                              7.7s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          889ms
+D/FlutterJNI( 5044): Beginning load of flutter...
+D/FlutterJNI( 5044): flutter (null) was loaded normally!
+I/flutter ( 5044): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+Syncing files to device sdk gphone64 x86 64...                     160ms
+
+Flutter run key commands.
+r Hot reload. 🔥🔥🔥
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on sdk gphone64 x86 64 is available at: http://127.0.0.1:37955/XlsYyznXF9Q=/
+I/Choreographer( 5044): Skipped 42 frames!  The application may be doing too much work on its main thread.
+D/WindowLayoutComponentImpl( 5044): Register WindowLayoutInfoListener on Context=com.andaake.app.MainActivity@7e38366, of which baseContext=android.app.ContextImpl@17908b5
+The Flutter DevTools debugger and profiler on sdk gphone64 x86 64 is available at: http://127.0.0.1:9100?uri=http://127.0.0.1:37955/XlsYyznXF9Q=/
+I/Choreographer( 5044): Skipped 70 frames!  The application may be doing too much work on its main thread.
+I/FLTFireBGExecutor( 5044): Creating background FlutterEngine instance, with args: [--enable-dart-profiling]
+D/FLTFireContextHolder( 5044): received application context.
+I/flutter ( 5044): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+I/Choreographer( 5044): Skipped 36 frames!  The application may be doing too much work on its main thread.
+I/FLTFireMsgService( 5044): FlutterFirebaseMessagingBackgroundService started!
+D/ProfileInstaller( 5044): Installing profile for com.andaake.app
+W/com.andaake.app( 5044): userfaultfd: MOVE ioctl seems unsupported: Connection timed out
+I/flutter ( 5044): ✅✅✅ FCM Token: cxHpTcQRRDWHtmA5rIvw71:APA91bEQbCbl1wIoMVh3CZXV-glYXUkCJPvgmw_d5xd3s4tzkuPejyzJEseEbTo-K9PxWdX7CrvA9KHTMy8Lx6PSv01EYBs9KfAzA0WUuHyqii_f_yKzz9c ✅✅✅
+D/InsetsController( 5044): hide(ime())
+I/ImeTracker( 5044): com.andaake.app:6de38109: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+D/InsetsController( 5044): hide(ime())
+I/ImeTracker( 5044): com.andaake.app:40b4a6c4: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+D/WindowOnBackDispatcher( 5044): setTopOnBackInvokedCallback (unwrapped): io.flutter.embedding.android.FlutterActivity$1@b068bd
+D/AudioSystem( 5044): onNewServiceWithAdapter: media.audio_flinger service obtained 0x74ae6bcd1ba0
+D/AudioSystem( 5044): getService: IAudioFlingerService retrieved: 0x74af4bc86b80  IAudioFlinger cached: 0x74ae6bcd1ba0
+V/MediaPlayer( 5044): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
+V/MediaPlayer( 5044): cleanDrmObj: mDrmObj=null mDrmSessionId=null
+I/flutter ( 5044): User acknowledged the alert.
+D/WindowOnBackDispatcher( 5044): setTopOnBackInvokedCallback (unwrapped): android.app.Activity$$ExternalSyntheticLambda0@1be261d
+V/MediaPlayer( 5044): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
+V/MediaPlayer( 5044): cleanDrmObj: mDrmObj=null mDrmSessionId=null
+V/MediaPlayer( 5044): resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
+V/MediaPlayer( 5044): cleanDrmObj: mDrmObj=null mDrmSessionId=null
