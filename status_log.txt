@@ -1,0 +1,27 @@
+interactive rebase in progress; onto 99c118c
+Last command done (1 command done):
+   pick fa1fb21 # test function added
+Next command to do (1 remaining command):
+   pick 554a5cc # reinitise
+  (use "git rebase --edit-todo" to view and edit)
+You are currently rebasing branch 'main' on '99c118c'.
+  (fix conflicts and then run "git rebase --continue")
+  (use "git rebase --skip" to skip this patch)
+  (use "git rebase --abort" to check out the original branch)
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   devices_log.txt
+	new file:   doctor_output.txt
+	new file:   linux_build_log.txt
+
+Unmerged paths:
+  (use "git restore --staged <file>..." to unstage)
+  (use "git add <file>..." to mark resolution)
+	both modified:   lib/main.dart
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	git_status.txt
+	status_log.txt
+

@@ -20,6 +20,7 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
   importance: Importance.max,
   playSound: true,
   sound: RawResourceAndroidNotificationSound('alarm'), // Plays the sound once for the notification
+  audioAttributesUsage: AudioAttributesUsage.alarm, // CRITICAL: Identifies this as an Alarm to Android system
 );
 
 // Background handler
@@ -154,7 +155,25 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
-      body: const Center(child: Text("Ready for alerts.")),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text("Ready for alerts."),
+            const SizedBox(height: 30),
+            ElevatedButton(
+              onPressed: () {
+                navigatorKey.currentState?.pushNamed('/alarm', arguments: "TEST MISSION: RED ALERT");
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("TEST ALARM"),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
