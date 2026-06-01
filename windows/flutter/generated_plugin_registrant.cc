@@ -7,14 +7,14 @@
 #include "generated_plugin_registrant.h"
 
 #include <audioplayers_windows/audioplayers_windows_plugin.h>
-#include <firebase_core/firebase_core_plugin_c_api.h>
+#include <connectivity_plus/connectivity_plus_windows_plugin.h>
 #include <flutter_volume_controller/flutter_volume_controller_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   AudioplayersWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("AudioplayersWindowsPlugin"));
-  FirebaseCorePluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("FirebaseCorePluginCApi"));
+  ConnectivityPlusWindowsPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("ConnectivityPlusWindowsPlugin"));
   FlutterVolumeControllerPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterVolumeControllerPluginCApi"));
 }

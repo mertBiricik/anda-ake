@@ -136,6 +136,12 @@ Desktop.ini
 !README.md
 
 # -------------------------
+# Docker / Deployment
+# -------------------------
+docker-compose.yml
+server/node_modules/
+
+# -------------------------
 # Metadata
 # -------------------------
 .metadata
