@@ -1,0 +1,45 @@
+// ANDA AKE - Authentication & Organization Schema
+// Role-based hierarchy for SAR teams
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MERKEZ       // Headquarters (Ankara) - Full access
+  IL_BASKANI   // Provincial Head - Access to their own province
+  RESCUER      // Team Member - Receives alarms for their province
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Hashed with bcrypt
+  name      String
+  role      Role     @default(RESCUER)
+  province  String?  // e.g., "Ankara", "Istanbul", "Izmir". Null for MERKEZ if they operate nationwide.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isActive  Boolean  @default(true) // Ability to deactivate a user
+  
+  // A user can trigger many alarms (if MERKEZ or IL_BASKANI)
+  alarmsSent AlarmLog[]
+}
+
+model AlarmLog {
+  id          String   @id @default(uuid())
+  title       String
+  body        String
+  priority    String   @default("critical")
+  targetProv  String?  // Target province (if null, means Nationwide/Tüm Türkiye)
+  senderId    String
+  sender      User     @relation(fields: [senderId], references: [id])
+  timestamp   DateTime @default(now())
+  clientsAck  Int      @default(0) // How many clients acknowledged
+}

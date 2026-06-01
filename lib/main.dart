@@ -14,16 +14,14 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'config.dart';
 import 'alarm_screen.dart';
 import 'models/alarm_message.dart';
 import 'services/websocket_service.dart';
 import 'services/notification_service.dart';
 import 'safety/acceptance_test.dart';
 
-// ============================================================
-// Configuration
-// ============================================================
-const String serverUrl = 'http://anda.biricik.de';
+import 'background/foreground_task_handler.dart';
 
 // Global navigator key for navigation from anywhere
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -33,6 +31,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // ============================================================
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Foreground Task System
+  BackgroundManager.initForegroundTask();
 
   // Initialize notifications (Firebase-free)
   await NotificationService.initialize(
@@ -70,14 +71,15 @@ class AndaAkeApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
-      title: 'ANDA AKE',
+      title: AppConfig.appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepOrange,
+          seedColor: const Color(0xFFFF6B35),
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
+        fontFamily: 'monospace',
       ),
       initialRoute: initialRoute ?? '/',
       routes: {
@@ -94,7 +96,26 @@ class AndaAkeApp extends StatelessWidget {
 }
 
 // ============================================================
-// Home Screen — Connection status + test controls
+// Tactical Color Palette
+// ============================================================
+class TacticalColors {
+  static const Color bg = Color(0xFF080C14);
+  static const Color surface = Color(0xFF0F1520);
+  static const Color panel = Color(0xFF141C2B);
+  static const Color border = Color(0xFF1E2D42);
+  static const Color borderActive = Color(0xFF2A4060);
+  static const Color textPrimary = Color(0xFFE8ECF2);
+  static const Color textSecondary = Color(0xFF6B7D95);
+  static const Color textMuted = Color(0xFF3D4F66);
+  static const Color green = Color(0xFF00E676);
+  static const Color amber = Color(0xFFFFC107);
+  static const Color red = Color(0xFFFF1744);
+  static const Color cyan = Color(0xFF64FFDA);
+  static const Color orange = Color(0xFFFF6B35);
+}
+
+// ============================================================
+// Home Screen — Tactical C2 Dashboard
 // ============================================================
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -103,23 +124,47 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late WebSocketService _wsService;
   ConnectionStatus _connectionStatus = ConnectionStatus.disconnected;
   final List<String> _logs = [];
   Timer? _pollingTimer;
   int _lastPollTimestamp = 0;
+  late AnimationController _pulseController;
+  DateTime _sessionStart = DateTime.now();
+  int _alarmsReceived = 0;
+  int _alarmsAcked = 0;
 
   @override
   void initState() {
     super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
     _initWebSocket();
     _loadLastPollTimestamp();
+    
+    // Start Foreground Service for safety-critical background reliability
+    BackgroundManager.startForegroundTask(onMessage: _handleBackgroundMessage);
+  }
+
+  void _handleBackgroundMessage(Map<String, dynamic> message) {
+    final type = message['type'];
+    
+    if (type == 'ALARM' && message['data'] != null) {
+      final alarm = AlarmMessage.fromJson(message['data']);
+      _onAlarmReceived(alarm);
+    } else if (type == 'LOG' && message['message'] != null) {
+      _addLog('[BG] ${message['message']}');
+    } else if (type == 'NAVIGATION' && message['payload'] != null) {
+      navigatorKey.currentState?.pushNamed('/alarm', arguments: message['payload']);
+    }
   }
 
   void _initWebSocket() {
     _wsService = WebSocketService(
-      serverUrl: serverUrl,
+      serverUrl: AppConfig.serverUrl,
       onAlarmReceived: _onAlarmReceived,
       onConnectionStatusChanged: (status) {
         setState(() => _connectionStatus = status);
@@ -132,10 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       },
       onLog: (log) {
-        setState(() {
-          _logs.add('[${_timeStr()}] $log');
-          if (_logs.length > 50) _logs.removeAt(0);
-        });
+        _addLog(log);
       },
     );
     _wsService.connect();
@@ -143,6 +185,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Handle incoming alarm — navigate to AlarmScreen
   void _onAlarmReceived(AlarmMessage alarm) {
+    setState(() => _alarmsReceived++);
+
     // Show notification (for background awareness)
     NotificationService.showAlarmNotification(
       id: alarm.hashCode,
@@ -158,6 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
           missionMessage: '${alarm.title}\n\n${alarm.body}',
           alarmId: alarm.missionId,
           onAcknowledge: (id) {
+            setState(() => _alarmsAcked++);
             _wsService.acknowledgeAlarm(alarm.id);
             NotificationService.cancelAll();
           },
@@ -167,40 +212,42 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // Recovery Block — Polling Fallback (Alternate Channel)
-  // If WebSocket is down, poll the server for pending alarms.
+  // Recovery Block — Polling Fallback (Alternate Channel, Ch.4)
   // ============================================================
   void _startPollingFallback() {
     _stopPollingFallback();
-    _addLog('📡 Starting polling fallback (Recovery Block: Alternate 1)');
+    _addLog('📡 Recovery Block ACTIVE — polling fallback engaged');
 
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
-      try {
-        final response = await http.get(
-          Uri.parse('$serverUrl/api/pending-alarms?since=$_lastPollTimestamp&apiKey=anda-ake-secret-key-change-me'),
-        ).timeout(const Duration(seconds: 5));
+    _pollingTimer = Timer.periodic(
+      Duration(seconds: AppConfig.pollingIntervalSeconds),
+      (_) async {
+        try {
+          final response = await http.get(
+            Uri.parse('${AppConfig.pendingAlarmsUrl}?since=$_lastPollTimestamp&apiKey=${Uri.encodeComponent(AppConfig.apiKey)}'),
+          ).timeout(Duration(seconds: AppConfig.pollingTimeoutSeconds));
 
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final alarms = data['alarms'] as List? ?? [];
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final alarms = data['alarms'] as List? ?? [];
 
-          for (final alarmJson in alarms) {
-            final alarm = AlarmMessage.fromJson(alarmJson);
-            final atResult = AlarmAcceptanceTest.validate(alarm);
+            for (final alarmJson in alarms) {
+              final alarm = AlarmMessage.fromJson(alarmJson);
+              final atResult = AlarmAcceptanceTest.validate(alarm);
 
-            if (atResult.passed) {
-              _addLog('📡 Polling found alarm: ${alarm.title}');
-              _onAlarmReceived(alarm);
+              if (atResult.passed) {
+                _addLog('📡 Polling recovered alarm: ${alarm.title}');
+                _onAlarmReceived(alarm);
+              }
             }
-          }
 
-          _lastPollTimestamp = data['server_time'] as int? ?? _lastPollTimestamp;
-          _saveLastPollTimestamp();
+            _lastPollTimestamp = data['server_time'] as int? ?? _lastPollTimestamp;
+            _saveLastPollTimestamp();
+          }
+        } catch (e) {
+          _addLog('📡 Poll error: $e');
         }
-      } catch (e) {
-        _addLog('📡 Polling error: $e');
-      }
-    });
+      },
+    );
   }
 
   void _stopPollingFallback() {
@@ -219,9 +266,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _addLog(String log) {
+    if (!mounted) return;
     setState(() {
       _logs.add('[${_timeStr()}] $log');
-      if (_logs.length > 50) _logs.removeAt(0);
+      if (_logs.length > 100) _logs.removeAt(0);
     });
   }
 
@@ -230,228 +278,341 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
   }
 
+  String _uptimeStr() {
+    final diff = DateTime.now().difference(_sessionStart);
+    final h = diff.inHours.toString().padLeft(2, '0');
+    final m = (diff.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
   @override
   void dispose() {
     _wsService.dispose();
     _stopPollingFallback();
+    _pulseController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('ANDA AKE'),
-        centerTitle: true,
-        actions: [
-          // Connection status indicator
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: _buildStatusIndicator(),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Connection card
-          _buildConnectionCard(),
-
-          // Test button
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  navigatorKey.currentState?.push(
-                    MaterialPageRoute(
-                      builder: (_) => AlarmScreen(
-                        missionMessage: 'TEST MISSION: RED ALERT\n\nBu bir test alarmıdır.',
-                        alarmId: 'TEST-${DateTime.now().millisecondsSinceEpoch}',
-                        onAcknowledge: (id) {
-                          debugPrint('Test alarm acknowledged: $id');
-                        },
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.warning_amber_rounded, size: 28),
-                label: const Text('TEST ALARM', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade700,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-          ),
-
-          // Log panel
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.terminal, color: Colors.green, size: 16),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'System Log',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        const Spacer(),
-                        if (_pollingTimer != null)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Text(
-                              'POLLING',
-                              style: TextStyle(color: Colors.orange, fontSize: 10, fontFamily: 'monospace'),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const Divider(color: Colors.green, height: 1),
-                  Expanded(
-                    child: ListView.builder(
-                      padding: const EdgeInsets.all(8),
-                      itemCount: _logs.length,
-                      reverse: true,
-                      itemBuilder: (context, index) {
-                        final log = _logs[_logs.length - 1 - index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 1),
-                          child: Text(
-                            log,
-                            style: TextStyle(
-                              color: log.contains('ERROR') || log.contains('❌')
-                                  ? Colors.red.shade300
-                                  : log.contains('🚨') || log.contains('ALARM')
-                                      ? Colors.yellow
-                                      : log.contains('✅')
-                                          ? Colors.green.shade300
-                                          : log.contains('⚠️') || log.contains('⛔')
-                                              ? Colors.orange.shade300
-                                              : Colors.green.shade100,
-                              fontSize: 11,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusIndicator() {
-    final color = switch (_connectionStatus) {
-      ConnectionStatus.connected => Colors.green,
-      ConnectionStatus.connecting => Colors.orange,
-      ConnectionStatus.disconnected => Colors.red,
-    };
-    final label = switch (_connectionStatus) {
-      ConnectionStatus.connected => 'LIVE',
-      ConnectionStatus.connecting => '...',
-      ConnectionStatus.disconnected => 'OFF',
-    };
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 6),
-        Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Widget _buildConnectionCard() {
-    return Card(
-      margin: const EdgeInsets.all(16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
+      backgroundColor: TacticalColors.bg,
+      body: SafeArea(
+        child: Column(
           children: [
-            Icon(
-              _connectionStatus == ConnectionStatus.connected
-                  ? Icons.cell_tower
-                  : Icons.signal_cellular_off,
-              size: 40,
-              color: _connectionStatus == ConnectionStatus.connected
-                  ? Colors.green
-                  : Colors.red,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _connectionStatus == ConnectionStatus.connected
-                        ? 'Ready for alerts'
-                        : _connectionStatus == ConnectionStatus.connecting
-                            ? 'Connecting...'
-                            : 'Disconnected',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    serverUrl,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-                  ),
-                  if (_wsService.clientId != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      'ID: ${_wsService.clientId}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade500,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            // Reconnect button
-            if (_connectionStatus == ConnectionStatus.disconnected)
-              IconButton(
-                onPressed: () {
-                  _wsService.dispose();
-                  _initWebSocket();
-                },
-                icon: const Icon(Icons.refresh, color: Colors.orange),
-              ),
+            _buildHeader(),
+            _buildStatusBar(),
+            _buildMetricsRow(),
+            _buildAlarmButton(),
+            Expanded(child: _buildLogPanel()),
+            _buildFooter(),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Header ──────────────────────────────────────────────────
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: TacticalColors.surface,
+        border: Border(bottom: BorderSide(color: TacticalColors.border, width: 1)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: TacticalColors.orange.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: TacticalColors.orange.withOpacity(0.3)),
+            ),
+            child: const Icon(Icons.radar, color: TacticalColors.orange, size: 24),
+          ),
+          const SizedBox(width: 12),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'ANDA AKE',
+                style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w900,
+                  letterSpacing: 3.0, color: TacticalColors.textPrimary,
+                ),
+              ),
+              Text(
+                'ARAMA KURTARMA // K2 TERMİNALİ',
+                style: TextStyle(
+                  fontSize: 10, letterSpacing: 1.5,
+                  color: TacticalColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          _buildConnectionBadge(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionBadge() {
+    final isConnected = _connectionStatus == ConnectionStatus.connected;
+    final isConnecting = _connectionStatus == ConnectionStatus.connecting;
+    final color = isConnected ? TacticalColors.green : isConnecting ? TacticalColors.amber : TacticalColors.red;
+    final label = isConnected ? 'BAĞLI' : isConnecting ? 'EŞLEŞİYOR' : 'ÇEVRİMDIŞI';
+
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, child) {
+        final opacity = isConnected ? 1.0 : (0.5 + 0.5 * _pulseController.value);
+        return Opacity(opacity: opacity, child: child);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withOpacity(0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(
+                color: color, shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 6)],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Status Bar ──────────────────────────────────────────────
+  Widget _buildStatusBar() {
+    final isConnected = _connectionStatus == ConnectionStatus.connected;
+    final isPolling = _pollingTimer != null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isConnected ? TacticalColors.green.withOpacity(0.05) : TacticalColors.red.withOpacity(0.05),
+        border: Border(
+          bottom: BorderSide(
+            color: isConnected ? TacticalColors.green.withOpacity(0.15) : TacticalColors.red.withOpacity(0.15),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isConnected ? Icons.link : Icons.link_off,
+            size: 16,
+            color: isConnected ? TacticalColors.green : TacticalColors.red,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              isConnected
+                  ? 'WS BAĞLI → ${AppConfig.serverUrl}'
+                  : 'WS KOPTU${isPolling ? " │ YEDEK SORGULAMA AKTİF" : ""}',
+              style: TextStyle(
+                fontSize: 11, letterSpacing: 0.5,
+                color: isConnected ? TacticalColors.green.withOpacity(0.8) : TacticalColors.red.withOpacity(0.8),
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (_wsService.clientId != null)
+            Text(
+              'UID:${_wsService.clientId!.split('-').first}',
+              style: TextStyle(fontSize: 10, color: TacticalColors.textMuted),
+            ),
+          if (!isConnected) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () { _wsService.dispose(); _initWebSocket(); },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: TacticalColors.amber.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(color: TacticalColors.amber.withOpacity(0.4)),
+                ),
+                child: const Text('YENİDEN DENE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: TacticalColors.amber)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Metrics Row ─────────────────────────────────────────────
+  Widget _buildMetricsRow() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: TacticalColors.border, width: 1)),
+      ),
+      child: Row(
+        children: [
+          _buildMetricTile('OTURUM', _uptimeStr(), TacticalColors.cyan),
+          _buildMetricTile('GELEN ALARM', '$_alarmsReceived', TacticalColors.orange),
+          _buildMetricTile('ONAYLANAN', '$_alarmsAcked', TacticalColors.green),
+          _buildMetricTile('KANAL', _pollingTimer != null ? 'SORG' : 'WS', _pollingTimer != null ? TacticalColors.amber : TacticalColors.cyan),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricTile(String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withOpacity(0.15)),
+        ),
+        child: Column(
+          children: [
+            Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color)),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: color.withOpacity(0.6), letterSpacing: 1.0)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Alarm Trigger Button ────────────────────────────────────
+  Widget _buildAlarmButton() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: SizedBox(
+        width: double.infinity,
+        height: 56,
+        child: ElevatedButton(
+          onPressed: () {
+            navigatorKey.currentState?.push(
+              MaterialPageRoute(
+                builder: (_) => AlarmScreen(
+                  missionMessage: 'TEST MISSION: RED ALERT\n\nEkip toplanma alanına intikal edin.',
+                  alarmId: 'TEST-${DateTime.now().millisecondsSinceEpoch}',
+                  onAcknowledge: (id) {
+                    debugPrint('Test alarm acknowledged: $id');
+                  },
+                ),
+              ),
+            );
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TacticalColors.red.withOpacity(0.15),
+            foregroundColor: TacticalColors.red,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(4),
+              side: BorderSide(color: TacticalColors.red.withOpacity(0.5), width: 1.5),
+            ),
+            elevation: 0,
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 22),
+              SizedBox(width: 10),
+              Text('YEREL ALARM TESTİNİ BAŞLAT', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Log Panel ───────────────────────────────────────────────
+  Widget _buildLogPanel() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+      decoration: BoxDecoration(
+        color: const Color(0xFF060A10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: TacticalColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: const BoxDecoration(
+              color: TacticalColors.panel,
+              borderRadius: BorderRadius.only(topLeft: Radius.circular(5), topRight: Radius.circular(5)),
+              border: Border(bottom: BorderSide(color: TacticalColors.border)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.terminal, color: TacticalColors.cyan, size: 14),
+                const SizedBox(width: 8),
+                const Text('SİSTEM GÜNLÜĞÜ', style: TextStyle(color: TacticalColors.cyan, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+                const Spacer(),
+                Text('${_logs.length} kayıt', style: TextStyle(color: TacticalColors.textMuted, fontSize: 10)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: _logs.length,
+              reverse: true,
+              itemBuilder: (context, index) {
+                final log = _logs[_logs.length - 1 - index];
+                final isError = log.contains('ERROR') || log.contains('❌') || log.contains('💀');
+                final isAlarm = log.contains('🚨') || log.contains('ALARM');
+                final isSuccess = log.contains('✅') || log.contains('LIVE') || log.contains('Connected');
+                final isPoll = log.contains('📡') || log.contains('Recovery');
+
+                Color textColor = TacticalColors.textSecondary;
+                if (isError) textColor = TacticalColors.red;
+                if (isAlarm) textColor = TacticalColors.orange;
+                if (isSuccess) textColor = TacticalColors.green;
+                if (isPoll) textColor = TacticalColors.amber;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                    log,
+                    style: TextStyle(color: textColor, fontSize: 11, fontWeight: isAlarm ? FontWeight.bold : FontWeight.normal),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Footer ──────────────────────────────────────────────────
+  Widget _buildFooter() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: TacticalColors.border, width: 1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('${AppConfig.appName} v${AppConfig.appVersion}', style: TextStyle(fontSize: 9, color: TacticalColors.textMuted, letterSpacing: 1.0)),
+          Text('GÜVENLİK-KRİTİK │ BÖL. 2-4', style: TextStyle(fontSize: 9, color: TacticalColors.textMuted, letterSpacing: 1.0)),
+        ],
       ),
     );
   }

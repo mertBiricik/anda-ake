@@ -6,6 +6,7 @@
 /// - Alarm Audio Stream: Bypasses DND/silent mode
 /// - Continuous Loop: Sound plays until ACKNOWLEDGE is pressed
 /// - ACK feedback: Sends acknowledgment back to server
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart' hide AVAudioSessionCategory;
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -29,25 +30,45 @@ class AlarmScreen extends StatefulWidget {
 }
 
 class _AlarmScreenState extends State<AlarmScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final AudioPlayer _audioPlayer = AudioPlayer();
   double? _originalVolume;
   late AnimationController _flashController;
+  late AnimationController _borderPulse;
   late Animation<double> _flashAnimation;
+  late Animation<double> _borderAnimation;
+  Timer? _elapsedTimer;
+  int _elapsedSeconds = 0;
+  final DateTime _alarmTime = DateTime.now();
 
   @override
   void initState() {
     super.initState();
 
-    // Flashing animation for urgency
+    // Flash animation — alternating red/black for urgency
     _flashController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 600),
     )..repeat(reverse: true);
 
-    _flashAnimation = Tween<double>(begin: 0.6, end: 1.0).animate(
+    _flashAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _flashController, curve: Curves.easeInOut),
     );
+
+    // Border pulse animation
+    _borderPulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+
+    _borderAnimation = Tween<double>(begin: 1.0, end: 3.0).animate(
+      CurvedAnimation(parent: _borderPulse, curve: Curves.easeInOut),
+    );
+
+    // Elapsed timer
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _elapsedSeconds++);
+    });
 
     _takeControl();
   }
@@ -113,9 +134,21 @@ class _AlarmScreenState extends State<AlarmScreen>
     }
   }
 
+  String _formatElapsed() {
+    final m = (_elapsedSeconds ~/ 60).toString().padLeft(2, '0');
+    final s = (_elapsedSeconds % 60).toString().padLeft(2, '0');
+    return '+$m:$s';
+  }
+
+  String _formatTime(DateTime dt) {
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
+  }
+
   @override
   void dispose() {
     _flashController.dispose();
+    _borderPulse.dispose();
+    _elapsedTimer?.cancel();
     WakelockPlus.disable();
     _audioPlayer.dispose();
     super.dispose();
@@ -124,90 +157,199 @@ class _AlarmScreenState extends State<AlarmScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.red.shade900,
-      body: SafeArea(
-        child: AnimatedBuilder(
-          animation: _flashAnimation,
-          builder: (context, child) {
-            return Container(
-              color: Color.lerp(
-                Colors.red.shade900,
-                Colors.black,
-                1.0 - _flashAnimation.value,
+      backgroundColor: Colors.black,
+      body: AnimatedBuilder(
+        animation: _flashAnimation,
+        builder: (context, child) {
+          return Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color.lerp(const Color(0xFF0A0000), const Color(0xFF3D0000), _flashAnimation.value)!,
+                  const Color(0xFF050000),
+                  Color.lerp(const Color(0xFF0A0000), const Color(0xFF3D0000), _flashAnimation.value)!,
+                ],
               ),
-              child: child,
-            );
-          },
+            ),
+            child: child,
+          );
+        },
+        child: SafeArea(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Spacer(),
-              // Alarm image
-              Image.asset('assets/alarm_image.png', height: 120),
-              const SizedBox(height: 40),
+              // ── Top Info Bar ──
+              _buildTopBar(),
+              const Spacer(flex: 1),
+              // ── Warning Icon ──
+              AnimatedBuilder(
+                animation: _flashAnimation,
+                builder: (context, _) {
+                  return Icon(
+                    Icons.warning_amber_rounded,
+                    size: 100,
+                    color: Color.lerp(const Color(0xFFFF1744), Colors.white, _flashAnimation.value),
+                    shadows: [
+                      Shadow(color: const Color(0xFFFF1744).withOpacity(0.8), blurRadius: 30),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              // ── Title ──
               const Text(
-                "🚨 CRITICAL MISSION 🚨",
+                'KRİTİK GÖREV',
                 style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 2,
+                  fontSize: 28, fontWeight: FontWeight.w900,
+                  color: Colors.white, letterSpacing: 6.0,
+                  fontFamily: 'monospace',
+                  shadows: [Shadow(color: Color(0xFFFF1744), blurRadius: 20)],
                 ),
               ),
-              const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Text(
-                  widget.missionMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    color: Colors.white,
-                    height: 1.4,
-                  ),
+              const SizedBox(height: 8),
+              AnimatedBuilder(
+                animation: _borderAnimation,
+                builder: (context, _) {
+                  return Container(
+                    height: 2,
+                    width: 200,
+                    color: Colors.redAccent.withOpacity(0.3 + 0.4 * _flashAnimation.value),
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
+              // ── Mission Message ──
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFFF1744).withOpacity(0.4), width: 1.5),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF1744).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text('GELEN BİLDİRİM', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFFFF1744), letterSpacing: 1.5)),
+                        ),
+                        const Spacer(),
+                        Text(_formatTime(_alarmTime), style: const TextStyle(fontSize: 10, color: Colors.white38, fontFamily: 'monospace')),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      widget.missionMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.bold,
+                        color: Colors.white, height: 1.5,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               if (widget.alarmId != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 Text(
-                  'Mission: ${widget.alarmId}',
+                  'OP_ID: ${widget.alarmId}',
                   style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white.withOpacity(0.5),
-                    fontFamily: 'monospace',
+                    fontSize: 12, fontWeight: FontWeight.w700,
+                    color: Colors.white.withOpacity(0.4), fontFamily: 'monospace', letterSpacing: 2.0,
                   ),
                 ),
               ],
-              const Spacer(),
-              // Acknowledge button
+              const Spacer(flex: 2),
+              // ── ACK Button ──
               Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 80,
-                  child: ElevatedButton(
-                    onPressed: _acknowledgeAndStop,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.red.shade900,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: AnimatedBuilder(
+                  animation: _borderAnimation,
+                  builder: (context, child) {
+                    return Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.1 + 0.05 * _borderAnimation.value),
+                            blurRadius: 10 * _borderAnimation.value,
+                            spreadRadius: 1,
+                          ),
+                        ],
                       ),
-                    ),
-                    child: const Text(
-                      "ACKNOWLEDGE",
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2,
+                      child: child,
+                    );
+                  },
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 80,
+                    child: ElevatedButton(
+                      onPressed: _acknowledgeAndStop,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFFC62828),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check_circle_outline, size: 32),
+                          SizedBox(width: 12),
+                          Text('ONAYLA VE SUSTUR', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 3.0)),
+                        ],
                       ),
                     ),
                   ),
                 ),
               ),
+              const SizedBox(height: 24),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF1744),
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: const Color(0xFFFF1744).withOpacity(0.8), blurRadius: 8)],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text('NÜKLEER ALARM', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFFFF1744), letterSpacing: 1.5, fontFamily: 'monospace')),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF1744).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'GEÇEN SÜRE ${_formatElapsed()}',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Color(0xFFFF1744), fontFamily: 'monospace', letterSpacing: 1.0),
+            ),
+          ),
+        ],
       ),
     );
   }

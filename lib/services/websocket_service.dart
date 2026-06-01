@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../config.dart';
 import '../models/alarm_message.dart';
 import '../safety/acceptance_test.dart';
 
@@ -28,9 +29,9 @@ class WebSocketService {
   int _missedHeartbeats = 0;
 
   // Configuration
-  static const int maxReconnectAttempts = 50;
-  static const int heartbeatIntervalSeconds = 15;
-  static const int maxMissedHeartbeats = 3;
+  static int get maxReconnectAttempts => AppConfig.maxReconnectAttempts;
+  static int get heartbeatIntervalSeconds => AppConfig.heartbeatIntervalSeconds;
+  static int get maxMissedHeartbeats => AppConfig.maxMissedHeartbeats;
 
   // Callbacks
   final ValueChanged<AlarmMessage> onAlarmReceived;
@@ -166,7 +167,7 @@ class WebSocketService {
   void _startHeartbeatMonitor() {
     _stopHeartbeatMonitor();
     _heartbeatTimer = Timer.periodic(
-      const Duration(seconds: heartbeatIntervalSeconds),
+      Duration(seconds: heartbeatIntervalSeconds),
       (_) {
         _missedHeartbeats++;
         if (_missedHeartbeats >= maxMissedHeartbeats) {
