@@ -51,13 +51,16 @@ void showLocalNotification(RemoteMessage message, FlutterLocalNotificationsPlugi
         channel.name,
         channelDescription: channel.description,
         icon: '@mipmap/ic_launcher',
-        priority: Priority.high,
+        priority: Priority.max,
         importance: Importance.max,
 
         // 🚨 THIS IS THE MAGIC 🚨
         // This tells Android to try and launch the app immediately (Full Screen Intent)
         // If the screen is locked, this is what triggers the "Wake Up" behavior
         fullScreenIntent: true,
+        category: AndroidNotificationCategory.alarm, // CRITICAL: Tells OS this is an alarm
+        visibility: NotificationVisibility.public, // Show on lock screen
+        audioAttributesUsage: AudioAttributesUsage.alarm, // Match channel usage
 
         // Keep the notification visible until acknowledged
         ongoing: true,
@@ -98,11 +101,27 @@ void main() async {
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  runApp(const MyApp());
+  // Check if app was launched by a notification (this is crucial for Full Screen Intent)
+  final NotificationAppLaunchDetails? notificationAppLaunchDetails =
+      await flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails();
+  
+  String? initialRoute = '/';
+  String? alarmPayload;
+
+  if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
+    print("🚨 App launched via Notification (Full Screen Intent) 🚨");
+    initialRoute = '/alarm';
+    alarmPayload = notificationAppLaunchDetails?.notificationResponse?.payload;
+  }
+
+  runApp(MyApp(initialRoute: initialRoute, alarmPayload: alarmPayload));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final String? initialRoute;
+  final String? alarmPayload;
+
+  const MyApp({super.key, this.initialRoute, this.alarmPayload});
 
   @override
   Widget build(BuildContext context) {
@@ -115,12 +134,12 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       // 4. Define the Routes
-      initialRoute: '/',
+      initialRoute: initialRoute ?? '/',
       routes: {
         '/': (context) => const MyHomePage(title: 'ANDA AKE Home'),
         '/alarm': (context) {
-          // Extract the message passed from the notification
-          final message = ModalRoute.of(context)!.settings.arguments as String? ?? "CRITICAL MISSION";
+          // Extract the message passed from the notification logic OR the constructor
+          final message = alarmPayload ?? ModalRoute.of(context)!.settings.arguments as String? ?? "CRITICAL MISSION";
           return AlarmScreen(missionMessage: message);
         },
       },
