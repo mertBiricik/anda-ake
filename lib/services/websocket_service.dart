@@ -38,8 +38,11 @@ class WebSocketService {
   final ValueChanged<ConnectionStatus> onConnectionStatusChanged;
   final ValueChanged<String> onLog;
 
+  final String token;
+
   WebSocketService({
     required this.serverUrl,
+    required this.token,
     required this.onAlarmReceived,
     required this.onConnectionStatusChanged,
     required this.onLog,
@@ -57,7 +60,7 @@ class WebSocketService {
 
     try {
       final wsUrl = serverUrl.replaceFirst('http', 'ws');
-      _channel = WebSocketChannel.connect(Uri.parse('$wsUrl/ws'));
+      _channel = WebSocketChannel.connect(Uri.parse('$wsUrl/ws?token=$token'));
 
       _channel!.stream.listen(
         _onMessage,

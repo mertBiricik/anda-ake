@@ -5,6 +5,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import '../services/websocket_service.dart';
 import '../services/notification_service.dart';
@@ -31,22 +32,29 @@ class AndaBackgroundHandler extends TaskHandler {
       },
     );
 
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token') ?? '';
+
     // Re-establish WebSocket connection in the background isolate
     _wsService = WebSocketService(
       serverUrl: AppConfig.serverUrl,
+      token: token,
       onAlarmReceived: (AlarmMessage alarm) {
         debugPrint('[Background] ALARM RECEIVED: ${alarm.title}');
         
-        // Show high-priority local notification to wake device
-        NotificationService.showAlarmNotification(
-          id: alarm.hashCode,
-          title: alarm.title,
-          body: alarm.body,
-          payload: alarm.body,
-        );
-
-        // Tell main isolate to handle UI
-        FlutterForegroundTask.sendDataToMain({'type': 'ALARM', 'data': alarm.toJson()});
+        // Safety-Critical: Acceptance test before alerting
+        final atResult = AlarmAcceptanceTest.validate(alarm);
+        if (atResult.passed) {
+          _sendToMainIsolate('ALARM', alarm.toJson());
+          NotificationService.showAlarmNotification(
+            id: alarm.hashCode,
+            title: alarm.title,
+            body: alarm.body,
+            payload: alarm.body,
+          );
+        } else {
+          debugPrint('[Background] Alarm failed AT: ${atResult.errors}');
+        }
       },
       onConnectionStatusChanged: (status) {
         debugPrint('[Background] WS Status: $status');

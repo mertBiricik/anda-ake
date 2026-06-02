@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config.dart';
+import 'login_screen.dart';
 import 'alarm_screen.dart';
 import 'models/alarm_message.dart';
 import 'services/websocket_service.dart';
@@ -44,9 +45,12 @@ void main() async {
     },
   );
 
+  final prefs = await SharedPreferences.getInstance();
+  final hasToken = prefs.getString('jwt_token') != null && prefs.getString('jwt_token')!.isNotEmpty;
+
   // Check if launched from notification
   final initialPayload = await NotificationService.getInitialPayload();
-  String? initialRoute = '/';
+  String? initialRoute = hasToken ? '/' : '/login';
   String? alarmPayload;
 
   if (initialPayload != null) {
@@ -83,6 +87,7 @@ class AndaAkeApp extends StatelessWidget {
       ),
       initialRoute: initialRoute ?? '/',
       routes: {
+        '/login': (context) => const LoginScreen(),
         '/': (context) => const HomeScreen(),
         '/alarm': (context) {
           final message = alarmPayload ??
@@ -135,6 +140,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _alarmsReceived = 0;
   int _alarmsAcked = 0;
 
+  String _jwtToken = '';
+  String _userRole = 'RESCUER';
+  String _userName = '';
+
   @override
   void initState() {
     super.initState();
@@ -142,11 +151,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
-    _initWebSocket();
-    _loadLastPollTimestamp();
     
-    // Start Foreground Service for safety-critical background reliability
-    BackgroundManager.startForegroundTask(onMessage: _handleBackgroundMessage);
+    _loadUserData().then((_) {
+      _initWebSocket();
+      _loadLastPollTimestamp();
+      BackgroundManager.startForegroundTask(onMessage: _handleBackgroundMessage);
+    });
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _jwtToken = prefs.getString('jwt_token') ?? '';
+      _userRole = prefs.getString('user_role') ?? 'RESCUER';
+      _userName = prefs.getString('user_name') ?? '';
+    });
   }
 
   void _handleBackgroundMessage(Map<String, dynamic> message) {
@@ -163,8 +182,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _initWebSocket() {
+    if (_jwtToken.isEmpty) return;
+
     _wsService = WebSocketService(
       serverUrl: AppConfig.serverUrl,
+      token: _jwtToken,
       onAlarmReceived: _onAlarmReceived,
       onConnectionStatusChanged: (status) {
         setState(() => _connectionStatus = status);
@@ -223,7 +245,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       (_) async {
         try {
           final response = await http.get(
-            Uri.parse('${AppConfig.pendingAlarmsUrl}?since=$_lastPollTimestamp&apiKey=${Uri.encodeComponent(AppConfig.apiKey)}'),
+            Uri.parse('${AppConfig.pendingAlarmsUrl}?since=$_lastPollTimestamp'),
+            headers: {'Authorization': 'Bearer $_jwtToken'},
           ).timeout(Duration(seconds: AppConfig.pollingTimeoutSeconds));
 
           if (response.statusCode == 200) {
@@ -304,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             _buildHeader(),
             _buildStatusBar(),
             _buildMetricsRow(),
-            _buildAlarmButton(),
+            if (_userRole == 'MERKEZ' || _userRole == 'IL_BASKANI') _buildAlarmButton(),
             Expanded(child: _buildLogPanel()),
             _buildFooter(),
           ],
@@ -344,8 +367,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
               Text(
-                'ARAMA KURTARMA // K2 TERMİNALİ',
-                style: TextStyle(
+                _userName.isNotEmpty ? _userName.toUpperCase() : 'ARAMA KURTARMA // K2 TERMİNALİ',
+                style: const TextStyle(
                   fontSize: 10, letterSpacing: 1.5,
                   color: TacticalColors.textSecondary,
                 ),
@@ -422,7 +445,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Expanded(
             child: Text(
               isConnected
-                  ? 'WS BAĞLI → ${AppConfig.serverUrl}'
+                  ? 'WS BAĞLI → ${AppConfig.serverUrl} [$_userRole]'
                   : 'WS KOPTU${isPolling ? " │ YEDEK SORGULAMA AKTİF" : ""}',
               style: TextStyle(
                 fontSize: 11, letterSpacing: 0.5,
@@ -503,18 +526,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         width: double.infinity,
         height: 56,
         child: ElevatedButton(
-          onPressed: () {
-            navigatorKey.currentState?.push(
-              MaterialPageRoute(
-                builder: (_) => AlarmScreen(
-                  missionMessage: 'TEST MISSION: RED ALERT\n\nEkip toplanma alanına intikal edin.',
-                  alarmId: 'TEST-${DateTime.now().millisecondsSinceEpoch}',
-                  onAcknowledge: (id) {
-                    debugPrint('Test alarm acknowledged: $id');
-                  },
-                ),
-              ),
-            );
+          onPressed: () async {
+            _addLog('ALARM TETİKLENİYOR (CANLI)...');
+            try {
+              final response = await http.post(
+                Uri.parse('${AppConfig.serverUrl}/api/trigger-alarm'),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $_jwtToken',
+                },
+                body: jsonEncode({
+                  'title': 'KIRMIZI ALARM: ACİL İNTİKAL',
+                  'body': '$_userName tarafından alarm tetiklendi. En yakın toplanma alanına geçin.',
+                  'priority': 'critical'
+                }),
+              ).timeout(const Duration(seconds: 10));
+
+              if (response.statusCode == 200) {
+                final data = jsonDecode(response.body);
+                _addLog('ALARM BAŞARILI: ${data['sent_to']} cihaza iletildi.');
+              } else {
+                _addLog('ALARM HATASI: Sunucu reddetti (${response.statusCode})');
+              }
+            } catch (e) {
+              _addLog('ALARM HATASI: Bağlantı kurulamadı.');
+            }
           },
           style: ElevatedButton.styleFrom(
             backgroundColor: TacticalColors.red.withOpacity(0.15),
@@ -528,9 +564,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.warning_amber_rounded, size: 22),
+              Icon(Icons.satellite_alt, size: 22),
               SizedBox(width: 10),
-              Text('YEREL ALARM TESTİNİ BAŞLAT', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+              Text('BİRLİKLERE ALARM GÖNDER (CANLI)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
             ],
           ),
         ),
