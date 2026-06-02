@@ -8,11 +8,15 @@ WORKDIR /app
 # Copy package files first for better Docker layer caching
 COPY package.json package-lock.json* ./
 
-# Install production dependencies only
-RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+# Install dependencies (including Prisma)
+RUN npm install
 
-# Copy application code
+# Copy application code and Prisma schema
 COPY server.js ./
+COPY prisma ./prisma/
+
+# Generate Prisma Client
+RUN npx prisma generate
 
 # Health check — Safety-Critical: detect if server is unresponsive
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

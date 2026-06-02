@@ -1,5 +1,5 @@
 /**
- * ANDA AKE — Safety-Critical SAR Alarm Server
+ * ANDA AKE — Safety-Critical SAR Alarm Server (with Authentication & Roles)
  * 
  * Architecture follows Safety-Critical Computer Systems principles:
  * - Acceptance Tests (AT): Validate every alarm payload before broadcast
@@ -7,25 +7,25 @@
  * - Forward Error Recovery: Pending alarm queue for reconnecting clients
  * - Robust Software: Handle all invalid inputs gracefully without crash
  * - Error Confinement: Single client errors don't affect others
- * 
- * Endpoints:
- *   WS  /ws                    → WebSocket connection for real-time alarms
- *   POST /api/trigger-alarm    → Trigger alarm to all connected clients
- *   GET  /api/pending-alarms   → Polling fallback (Recovery Block alternate)
- *   GET  /api/health           → Server health check
- *   GET  /api/clients          → Connected clients list
+ * - Authorization/Security: JWT & Role-based Access Control (MERKEZ, IL_BASKANI, RESCUER)
  */
 
 const express = require('express');
 const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const cors = require('cors');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
 
 // ============================================================
 // Configuration
 // ============================================================
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY || 'anda-ake-secret-key-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || 'anda-ake-super-secret-jwt-key';
 const HEARTBEAT_INTERVAL_MS = 15000;   // 15 seconds between pings
 const MAX_MISSED_HEARTBEATS = 3;       // 3 misses = dead client
 const PENDING_ALARM_TTL_MS = 300000;   // Keep pending alarms for 5 minutes
@@ -34,9 +34,9 @@ const MAX_PENDING_ALARMS = 50;         // Max pending alarms in memory
 // ============================================================
 // State
 // ============================================================
-const clients = new Map();        // clientId -> { ws, alive, missedBeats, connectedAt, lastAckAt, deviceInfo }
-const pendingAlarms = [];         // Array of { id, payload, timestamp, ackedBy[] }
-const alarmHistory = [];          // Last 100 alarms for audit trail
+// clientId -> { ws, alive, missedBeats, connectedAt, lastAckAt, deviceInfo, user: { id, email, role, province } }
+const clients = new Map();        
+const pendingAlarms = [];         
 let serverStartTime = Date.now();
 
 // ============================================================
@@ -44,243 +44,289 @@ let serverStartTime = Date.now();
 // ============================================================
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 // ============================================================
 // Acceptance Test Module (Safety-Critical: Chapter 4)
-// 
-// "Is this value physically possible?" — Every alarm payload
-// must pass these checks before being broadcast to clients.
 // ============================================================
 function acceptanceTest(payload) {
   const errors = [];
-
-  // AT-1: Required fields exist
   if (!payload.title || typeof payload.title !== 'string' || payload.title.trim().length === 0) {
     errors.push('AT-1 FAIL: title is required and must be non-empty string');
   }
   if (!payload.body || typeof payload.body !== 'string' || payload.body.trim().length === 0) {
     errors.push('AT-2 FAIL: body is required and must be non-empty string');
   }
-
-  // AT-3: Title and body length sanity check
   if (payload.title && payload.title.length > 200) {
     errors.push('AT-3 FAIL: title exceeds 200 characters');
   }
   if (payload.body && payload.body.length > 1000) {
     errors.push('AT-4 FAIL: body exceeds 1000 characters');
   }
-
-  // AT-5: Priority validation
   const validPriorities = ['critical', 'high', 'normal'];
   if (payload.priority && !validPriorities.includes(payload.priority)) {
     errors.push(`AT-5 FAIL: priority must be one of: ${validPriorities.join(', ')}`);
   }
-
-  return {
-    passed: errors.length === 0,
-    errors
-  };
+  return { passed: errors.length === 0, errors };
 }
 
 // ============================================================
-// Authentication Middleware (Robust Software: validate all inputs)
+// Authentication Middleware
 // ============================================================
-function authenticateApiKey(req, res, next) {
-  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-  if (!apiKey || apiKey !== API_KEY) {
-    console.warn(`[AUTH] Rejected request from ${req.ip} — invalid API key`);
-    return res.status(401).json({ 
-      success: false, 
-      error: 'Unauthorized: invalid or missing API key' 
-    });
+function authenticateJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Missing or invalid token' });
   }
-  next();
+
+  const token = authHeader.split(' ')[1];
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ success: false, error: 'Forbidden: Invalid token' });
+    }
+    req.user = user;
+    next();
+  });
 }
 
 // ============================================================
-// REST API Routes
+// REST API Routes - AUTHENTICATION
 // ============================================================
 
 /**
- * POST /api/trigger-alarm
- * Trigger a nuclear alarm to all connected clients.
- * 
- * Body: { title, body, priority?, mission_id? }
- * Headers: X-API-Key: <api_key>
+ * POST /api/setup
+ * Creates the initial MERKEZ admin if the database is empty.
  */
-app.post('/api/trigger-alarm', authenticateApiKey, (req, res) => {
+app.post('/api/setup', async (req, res) => {
+  try {
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      return res.status(400).json({ success: false, error: 'Setup already completed. Users exist.' });
+    }
+
+    const { email, password, name } = req.body;
+    if (!email || !password || !name) {
+      return res.status(400).json({ success: false, error: 'email, password, and name are required' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const admin = await prisma.user.create({
+      data: { email, password: hashedPassword, name, role: 'MERKEZ' }
+    });
+
+    res.json({ success: true, message: 'Initial MERKEZ admin created successfully', user: { id: admin.id, email: admin.email } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * POST /api/login
+ * Authenticates a user and returns a JWT.
+ */
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ success: false, error: 'Email and password required' });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.isActive) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials or inactive account' });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role, province: user.province }, 
+      JWT_SECRET, 
+      { expiresIn: '7d' } // 1 week validity
+    );
+
+    res.json({ success: true, token, user: { id: user.id, name: user.name, email: user.email, role: user.role, province: user.province } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/me
+ * Gets the current authenticated user's info
+ */
+app.get('/api/me', authenticateJWT, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, name: true, email: true, role: true, province: true, isActive: true }});
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// ============================================================
+// REST API Routes - ALARMS
+// ============================================================
+
+app.post('/api/trigger-alarm', authenticateJWT, async (req, res) => {
   const payload = req.body;
-  
-  // Acceptance Test — reject invalid payloads before broadcast
+  const user = req.user; // User from JWT
+
+  // 1. Authorization checks based on role
+  if (user.role === 'RESCUER') {
+    return res.status(403).json({ success: false, error: 'RESCUER role cannot trigger alarms.' });
+  }
+
+  // If IL_BASKANI, they can only trigger for their own province
+  let targetProv = payload.targetProv || null;
+  if (user.role === 'IL_BASKANI') {
+    if (!user.province) {
+      return res.status(403).json({ success: false, error: 'Your account is not assigned to a province.' });
+    }
+    // Force the target province to the user's province
+    targetProv = user.province;
+  }
+
+  // 2. Acceptance Test — reject invalid payloads before broadcast
   const atResult = acceptanceTest(payload);
   if (!atResult.passed) {
     console.warn(`[AT] Alarm REJECTED:`, atResult.errors);
-    return res.status(400).json({
-      success: false,
-      error: 'Acceptance Test failed',
-      details: atResult.errors
-    });
+    return res.status(400).json({ success: false, error: 'Acceptance Test failed', details: atResult.errors });
   }
 
-  // Construct alarm message
-  const alarm = {
-    id: uuidv4(),
-    type: 'ALARM',
-    payload: {
-      title: payload.title.trim(),
-      body: payload.body.trim(),
-      priority: payload.priority || 'critical',
-      mission_id: payload.mission_id || `SAR-${Date.now()}`
-    },
-    timestamp: Date.now(),
-    ackedBy: []
-  };
-
-  // Store in pending alarms (for polling fallback — Recovery Block Alternate)
-  pendingAlarms.push(alarm);
-  if (pendingAlarms.length > MAX_PENDING_ALARMS) {
-    pendingAlarms.shift(); // Remove oldest
-  }
-
-  // Store in history (audit trail)
-  alarmHistory.push({
-    ...alarm,
-    connectedClientsAtTime: clients.size,
-    triggeredBy: req.ip
-  });
-  if (alarmHistory.length > 100) {
-    alarmHistory.shift();
-  }
-
-  // Broadcast to all connected WebSocket clients
-  let sentCount = 0;
-  let failCount = 0;
-  const message = JSON.stringify(alarm);
-
-  clients.forEach((client, clientId) => {
-    try {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(message);
-        sentCount++;
-        console.log(`[ALARM] Sent to client ${clientId}`);
-      } else {
-        failCount++;
-        console.warn(`[ALARM] Client ${clientId} not in OPEN state (${client.ws.readyState})`);
+  try {
+    // 3. Save to Database (Audit log)
+    const dbAlarm = await prisma.alarmLog.create({
+      data: {
+        title: payload.title.trim(),
+        body: payload.body.trim(),
+        priority: payload.priority || 'critical',
+        targetProv: targetProv,
+        senderId: user.id
       }
-    } catch (err) {
-      // Error Confinement: one client's error doesn't affect others
-      failCount++;
-      console.error(`[ALARM] Error sending to ${clientId}:`, err.message);
-    }
-  });
+    });
 
-  console.log(`[ALARM] 🚨 Broadcast complete: ${sentCount} sent, ${failCount} failed, alarm_id=${alarm.id}`);
+    // 4. Construct alarm message for clients
+    const alarm = {
+      id: dbAlarm.id,
+      type: 'ALARM',
+      payload: {
+        title: dbAlarm.title,
+        body: dbAlarm.body,
+        priority: dbAlarm.priority,
+        targetProv: dbAlarm.targetProv,
+        mission_id: payload.mission_id || `SAR-${Date.now()}`
+      },
+      timestamp: Date.now(),
+      ackedBy: []
+    };
 
-  res.json({
-    success: true,
-    alarm_id: alarm.id,
-    sent_to: sentCount,
-    failed: failCount,
-    total_clients: clients.size,
-    timestamp: alarm.timestamp
-  });
+    // Store in pending alarms (for polling fallback)
+    pendingAlarms.push(alarm);
+    if (pendingAlarms.length > MAX_PENDING_ALARMS) pendingAlarms.shift();
+
+    // 5. Broadcast to connected WebSocket clients based on Target Province
+    let sentCount = 0;
+    let failCount = 0;
+    const message = JSON.stringify(alarm);
+
+    clients.forEach((client, clientId) => {
+      // Check location logic:
+      // If alarm is nationwide (targetProv is null), send to everyone.
+      // If alarm has a specific province, send ONLY to clients in that province OR MERKEZ clients (so they see what's happening).
+      const shouldSend = 
+        !targetProv || // Nationwide
+        (client.user.province === targetProv) || // Belongs to target province
+        (client.user.role === 'MERKEZ'); // HQ sees everything
+
+      if (shouldSend) {
+        try {
+          if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(message);
+            sentCount++;
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          failCount++;
+        }
+      }
+    });
+
+    console.log(`[ALARM] 🚨 Broadcast complete: ${sentCount} sent, ${failCount} failed, alarm_id=${alarm.id}`);
+
+    res.json({
+      success: true,
+      alarm_id: alarm.id,
+      sent_to: sentCount,
+      failed: failCount,
+      total_clients: clients.size,
+      timestamp: alarm.timestamp
+    });
+
+  } catch (error) {
+    console.error('[ALARM] DB Error:', error);
+    res.status(500).json({ success: false, error: 'Database error while saving alarm' });
+  }
 });
 
 /**
  * GET /api/pending-alarms
- * Polling fallback endpoint (Recovery Block: Alternate 1)
- * 
- * Query: ?since=<timestamp> — only return alarms newer than this
- * Headers: X-API-Key: <api_key>
+ * Polling fallback endpoint for authenticated users
  */
-app.get('/api/pending-alarms', authenticateApiKey, (req, res) => {
+app.get('/api/pending-alarms', authenticateJWT, (req, res) => {
   const since = parseInt(req.query.since) || 0;
   const now = Date.now();
+  const user = req.user;
 
-  // Filter: only alarms newer than 'since' and not expired
-  const relevant = pendingAlarms.filter(a => 
-    a.timestamp > since && 
-    (now - a.timestamp) < PENDING_ALARM_TTL_MS
-  );
-
-  res.json({
-    success: true,
-    alarms: relevant,
-    count: relevant.length,
-    server_time: now
+  // Filter: newer than 'since', not expired, and intended for the user's province
+  const relevant = pendingAlarms.filter(a => {
+    const isNewAndValid = a.timestamp > since && (now - a.timestamp) < PENDING_ALARM_TTL_MS;
+    const isForUser = !a.payload.targetProv || a.payload.targetProv === user.province || user.role === 'MERKEZ';
+    return isNewAndValid && isForUser;
   });
+
+  res.json({ success: true, alarms: relevant, count: relevant.length, server_time: now });
 });
 
 /**
  * POST /api/ack
- * Acknowledge an alarm (client confirms receipt)
- * 
- * Body: { alarm_id, client_id }
  */
-app.post('/api/ack', (req, res) => {
+app.post('/api/ack', authenticateJWT, async (req, res) => {
   const { alarm_id, client_id } = req.body;
-
-  if (!alarm_id || !client_id) {
-    return res.status(400).json({ success: false, error: 'alarm_id and client_id required' });
-  }
+  if (!alarm_id || !client_id) return res.status(400).json({ success: false, error: 'alarm_id and client_id required' });
 
   const alarm = pendingAlarms.find(a => a.id === alarm_id);
   if (alarm && !alarm.ackedBy.includes(client_id)) {
     alarm.ackedBy.push(client_id);
     console.log(`[ACK] Client ${client_id} acknowledged alarm ${alarm_id}`);
+    
+    // Update DB async
+    prisma.alarmLog.update({
+      where: { id: alarm_id },
+      data: { clientsAck: { increment: 1 } }
+    }).catch(err => console.error('DB Ack update failed', err));
   }
 
-  // Update client's last ack time
   const client = clients.get(client_id);
-  if (client) {
-    client.lastAckAt = Date.now();
-  }
+  if (client) client.lastAckAt = Date.now();
 
   res.json({ success: true });
 });
 
 /**
  * GET /api/health
- * Server health check endpoint
  */
 app.get('/api/health', (req, res) => {
   const now = Date.now();
-  const uptimeMs = now - serverStartTime;
-  
   res.json({
     status: 'ok',
-    uptime_seconds: Math.floor(uptimeMs / 1000),
-    uptime_human: formatUptime(uptimeMs),
+    uptime_seconds: Math.floor((now - serverStartTime) / 1000),
     connected_clients: clients.size,
-    pending_alarms: pendingAlarms.filter(a => (now - a.timestamp) < PENDING_ALARM_TTL_MS).length,
-    total_alarms_sent: alarmHistory.length,
-    heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
     server_time: now,
-    version: '1.0.0'
-  });
-});
-
-/**
- * GET /api/clients
- * List connected clients (admin)
- */
-app.get('/api/clients', authenticateApiKey, (req, res) => {
-  const clientList = [];
-  clients.forEach((client, id) => {
-    clientList.push({
-      id,
-      connected_at: client.connectedAt,
-      last_ack_at: client.lastAckAt,
-      missed_beats: client.missedBeats,
-      alive: client.alive,
-      device_info: client.deviceInfo
-    });
-  });
-
-  res.json({
-    success: true,
-    clients: clientList,
-    count: clientList.length
+    version: '2.0.0-auth'
   });
 });
 
@@ -298,222 +344,144 @@ const wss = new WebSocketServer({
 // WebSocket Connection Handler
 // ============================================================
 wss.on('connection', (ws, req) => {
-  const clientId = uuidv4();
-  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get('token');
 
-  // Register client
-  clients.set(clientId, {
-    ws,
-    alive: true,
-    missedBeats: 0,
-    connectedAt: Date.now(),
-    lastAckAt: null,
-    deviceInfo: null
-  });
+  // Require token for WS connection
+  if (!token) {
+    ws.close(1008, 'Unauthorized: Missing token');
+    return;
+  }
 
-  console.log(`[WS] ✅ Client connected: ${clientId} from ${clientIp} (total: ${clients.size})`);
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      ws.close(1008, 'Unauthorized: Invalid token');
+      return;
+    }
 
-  // Send welcome message with client ID
-  ws.send(JSON.stringify({
-    type: 'WELCOME',
-    client_id: clientId,
-    server_time: Date.now(),
-    heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS
-  }));
+    const clientId = uuidv4();
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-  // Handle incoming messages from client
-  ws.on('message', (data) => {
-    try {
-      const message = JSON.parse(data.toString());
+    clients.set(clientId, {
+      ws,
+      alive: true,
+      missedBeats: 0,
+      connectedAt: Date.now(),
+      lastAckAt: null,
+      deviceInfo: null,
+      user // Attach authenticated user data to the WebSocket client
+    });
 
-      switch (message.type) {
-        case 'ACK':
-          // Client acknowledges an alarm
-          handleAck(clientId, message.alarm_id);
-          break;
+    console.log(`[WS] ✅ ${user.role} connected: ${user.email} (Total: ${clients.size})`);
 
-        case 'REGISTER':
-          // Client sends device info
-          const client = clients.get(clientId);
-          if (client) {
-            client.deviceInfo = message.device_info || {};
-            console.log(`[WS] Client ${clientId} registered device:`, client.deviceInfo);
-          }
-          break;
+    ws.send(JSON.stringify({
+      type: 'WELCOME',
+      client_id: clientId,
+      server_time: Date.now(),
+      heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS
+    }));
 
-        case 'PONG':
-          // Client responds to heartbeat (manual pong for app-level heartbeat)
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === 'ACK') handleAck(clientId, message.alarm_id);
+        else if (message.type === 'PONG') {
           const c = clients.get(clientId);
-          if (c) {
-            c.alive = true;
-            c.missedBeats = 0;
-          }
-          break;
-
-        default:
-          console.warn(`[WS] Unknown message type from ${clientId}:`, message.type);
+          if (c) { c.alive = true; c.missedBeats = 0; }
+        }
+      } catch (err) {
+        console.warn(`[WS] Malformed message from ${clientId}`);
       }
-    } catch (err) {
-      // Robust Software: don't crash on malformed messages
-      console.warn(`[WS] Malformed message from ${clientId}:`, err.message);
-    }
-  });
+    });
 
-  // Handle WebSocket-level pong (protocol-level heartbeat)
-  ws.on('pong', () => {
-    const client = clients.get(clientId);
-    if (client) {
-      client.alive = true;
-      client.missedBeats = 0;
-    }
-  });
+    ws.on('pong', () => {
+      const client = clients.get(clientId);
+      if (client) { client.alive = true; client.missedBeats = 0; }
+    });
 
-  // Handle disconnection
-  ws.on('close', (code, reason) => {
-    clients.delete(clientId);
-    console.log(`[WS] ❌ Client disconnected: ${clientId} (code: ${code}, total: ${clients.size})`);
-  });
+    ws.on('close', () => {
+      clients.delete(clientId);
+      console.log(`[WS] ❌ Client disconnected: ${user.email} (total: ${clients.size})`);
+    });
 
-  // Handle errors (Error Confinement: isolate per-client errors)
-  ws.on('error', (err) => {
-    console.error(`[WS] Error from client ${clientId}:`, err.message);
-    clients.delete(clientId);
+    ws.on('error', (err) => {
+      console.error(`[WS] Error from client ${user.email}:`, err.message);
+      clients.delete(clientId);
+    });
   });
 });
 
 // ============================================================
-// Heartbeat Watchdog (Safety-Critical: Chapter 3)
-// 
-// Every HEARTBEAT_INTERVAL_MS, ping all clients.
-// If a client misses MAX_MISSED_HEARTBEATS pongs, terminate it.
-// This prevents ghost connections from accumulating.
+// Heartbeat Watchdog
 // ============================================================
 const heartbeatInterval = setInterval(() => {
   clients.forEach((client, clientId) => {
     if (!client.alive) {
       client.missedBeats++;
-
       if (client.missedBeats >= MAX_MISSED_HEARTBEATS) {
-        console.warn(`[HEARTBEAT] 💀 Client ${clientId} dead (${client.missedBeats} missed beats) — terminating`);
+        console.warn(`[HEARTBEAT] 💀 Client ${client.user.email} dead — terminating`);
         client.ws.terminate();
         clients.delete(clientId);
         return;
       }
-
-      console.warn(`[HEARTBEAT] ⚠️ Client ${clientId} missed beat ${client.missedBeats}/${MAX_MISSED_HEARTBEATS}`);
     }
-
-    // Mark as not-alive, wait for pong to set it back
     client.alive = false;
-
-    // Send both protocol-level ping and app-level ping
     try {
       if (client.ws.readyState === WebSocket.OPEN) {
         client.ws.ping();
-        client.ws.send(JSON.stringify({ 
-          type: 'PING', 
-          timestamp: Date.now() 
-        }));
+        client.ws.send(JSON.stringify({ type: 'PING', timestamp: Date.now() }));
       }
-    } catch (err) {
-      console.error(`[HEARTBEAT] Error pinging ${clientId}:`, err.message);
-    }
+    } catch (err) {}
   });
 }, HEARTBEAT_INTERVAL_MS);
-
-// Cleanup expired pending alarms periodically
-const cleanupInterval = setInterval(() => {
-  const now = Date.now();
-  while (pendingAlarms.length > 0 && (now - pendingAlarms[0].timestamp) > PENDING_ALARM_TTL_MS) {
-    const removed = pendingAlarms.shift();
-    console.log(`[CLEANUP] Expired alarm removed: ${removed.id}`);
-  }
-}, 60000); // Every minute
 
 // ============================================================
 // ACK Handler
 // ============================================================
 function handleAck(clientId, alarmId) {
   if (!alarmId) return;
-
   const alarm = pendingAlarms.find(a => a.id === alarmId);
   if (alarm && !alarm.ackedBy.includes(clientId)) {
     alarm.ackedBy.push(clientId);
+    prisma.alarmLog.update({
+      where: { id: alarmId },
+      data: { clientsAck: { increment: 1 } }
+    }).catch(() => {});
   }
-
   const client = clients.get(clientId);
-  if (client) {
-    client.lastAckAt = Date.now();
-  }
-
-  console.log(`[ACK] ✅ Client ${clientId} acknowledged alarm ${alarmId}`);
-
-  // Send ACK confirmation back
+  if (client) client.lastAckAt = Date.now();
+  
   try {
-    const c = clients.get(clientId);
-    if (c && c.ws.readyState === WebSocket.OPEN) {
-      c.ws.send(JSON.stringify({
-        type: 'ACK_CONFIRMED',
-        alarm_id: alarmId,
-        timestamp: Date.now()
-      }));
+    if (client && client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(JSON.stringify({ type: 'ACK_CONFIRMED', alarm_id: alarmId, timestamp: Date.now() }));
     }
-  } catch (err) {
-    console.error(`[ACK] Error sending confirmation to ${clientId}:`, err.message);
-  }
+  } catch (err) {}
 }
 
 // ============================================================
-// Utility Functions
-// ============================================================
-function formatUptime(ms) {
-  const seconds = Math.floor(ms / 1000);
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  return `${days}d ${hours}h ${minutes}m ${secs}s`;
-}
-
-// ============================================================
-// Graceful Shutdown (Safety-Critical: proper resource cleanup)
+// Graceful Shutdown
 // ============================================================
 function shutdown(signal) {
   console.log(`\n[SERVER] ${signal} received — graceful shutdown...`);
-
   clearInterval(heartbeatInterval);
-  clearInterval(cleanupInterval);
-
-  // Notify all clients
-  clients.forEach((client, clientId) => {
+  
+  clients.forEach(client => {
     try {
       if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(JSON.stringify({
-          type: 'SERVER_SHUTDOWN',
-          message: 'Server is shutting down. Reconnect shortly.',
-          timestamp: Date.now()
-        }));
-        client.ws.close(1001, 'Server shutdown');
+        client.ws.send(JSON.stringify({ type: 'SERVER_SHUTDOWN', message: 'Server shutting down' }));
+        client.ws.close(1001, 'Shutdown');
       }
-    } catch (err) {
-      // Ignore errors during shutdown
-    }
+    } catch (err) {}
   });
-
+  
   wss.close(() => {
-    server.close(() => {
+    server.close(async () => {
+      await prisma.$disconnect();
       console.log('[SERVER] Shutdown complete.');
       process.exit(0);
     });
   });
-
-  // Force exit after 5 seconds
-  setTimeout(() => {
-    console.error('[SERVER] Forced exit after timeout');
-    process.exit(1);
-  }, 5000);
 }
-
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
@@ -521,15 +489,11 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 // Start Server
 // ============================================================
 server.listen(PORT, () => {
-  console.log('');
   console.log('╔══════════════════════════════════════════════╗');
   console.log('║     🚨 ANDA AKE — SAR Alarm Server 🚨      ║');
-  console.log('║   Safety-Critical WebSocket Architecture     ║');
+  console.log('║   Auth & DB Enabled | JWT Token Security     ║');
   console.log('╠══════════════════════════════════════════════╣');
   console.log(`║  HTTP API:     http://0.0.0.0:${PORT}            ║`);
   console.log(`║  WebSocket:    ws://0.0.0.0:${PORT}/ws           ║`);
-  console.log(`║  Heartbeat:    every ${HEARTBEAT_INTERVAL_MS / 1000}s (max ${MAX_MISSED_HEARTBEATS} misses)      ║`);
-  console.log(`║  Pending TTL:  ${PENDING_ALARM_TTL_MS / 1000}s                          ║`);
   console.log('╚══════════════════════════════════════════════╝');
-  console.log('');
 });
