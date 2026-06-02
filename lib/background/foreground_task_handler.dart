@@ -10,6 +10,7 @@ import '../config.dart';
 import '../services/websocket_service.dart';
 import '../services/notification_service.dart';
 import '../models/alarm_message.dart';
+import '../safety/acceptance_test.dart';
 
 @pragma('vm:entry-point')
 void startCallback() {
@@ -45,7 +46,7 @@ class AndaBackgroundHandler extends TaskHandler {
         // Safety-Critical: Acceptance test before alerting
         final atResult = AlarmAcceptanceTest.validate(alarm);
         if (atResult.passed) {
-          _sendToMainIsolate('ALARM', alarm.toJson());
+          FlutterForegroundTask.sendDataToMain({'type': 'ALARM', 'data': alarm.toJson()});
           NotificationService.showAlarmNotification(
             id: alarm.hashCode,
             title: alarm.title,
@@ -53,7 +54,7 @@ class AndaBackgroundHandler extends TaskHandler {
             payload: alarm.body,
           );
         } else {
-          debugPrint('[Background] Alarm failed AT: ${atResult.errors}');
+          debugPrint('[Background] Alarm failed AT: ${atResult.reason}');
         }
       },
       onConnectionStatusChanged: (status) {

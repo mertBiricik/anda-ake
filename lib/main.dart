@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config.dart';
 import 'login_screen.dart';
+import 'user_management_screen.dart';
 import 'alarm_screen.dart';
 import 'models/alarm_message.dart';
 import 'services/websocket_service.dart';
@@ -88,6 +89,7 @@ class AndaAkeApp extends StatelessWidget {
       initialRoute: initialRoute ?? '/',
       routes: {
         '/login': (context) => const LoginScreen(),
+        '/users': (context) => const UserManagementScreen(),
         '/': (context) => const HomeScreen(),
         '/alarm': (context) {
           final message = alarmPayload ??
@@ -130,7 +132,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  late WebSocketService _wsService;
+  WebSocketService? _wsService;
   ConnectionStatus _connectionStatus = ConnectionStatus.disconnected;
   final List<String> _logs = [];
   Timer? _pollingTimer;
@@ -202,7 +204,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _addLog(log);
       },
     );
-    _wsService.connect();
+    _wsService!.connect();
   }
 
   /// Handle incoming alarm — navigate to AlarmScreen
@@ -225,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           alarmId: alarm.missionId,
           onAcknowledge: (id) {
             setState(() => _alarmsAcked++);
-            _wsService.acknowledgeAlarm(alarm.id);
+            _wsService?.acknowledgeAlarm(alarm.id);
             NotificationService.cancelAll();
           },
         ),
@@ -311,7 +313,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _wsService.dispose();
+    _wsService?.dispose();
     _stopPollingFallback();
     _pulseController.dispose();
     super.dispose();
@@ -356,10 +358,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: const Icon(Icons.radar, color: TacticalColors.orange, size: 24),
           ),
           const SizedBox(width: 12),
-          const Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'ANDA AKE',
                 style: TextStyle(
                   fontSize: 18, fontWeight: FontWeight.w900,
@@ -376,6 +378,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const Spacer(),
+          if (_userRole == 'MERKEZ' || _userRole == 'IL_BASKANI')
+            IconButton(
+              icon: const Icon(Icons.people, color: TacticalColors.cyan),
+              onPressed: () => Navigator.pushNamed(context, '/users'),
+              tooltip: 'Personel Yönetimi',
+            ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: TacticalColors.red),
+            tooltip: 'Çıkış Yap',
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('jwt_token');
+              await prefs.remove('user_role');
+              await prefs.remove('user_name');
+              await prefs.remove('user_province');
+              if (mounted) {
+                _wsService?.dispose();
+                Navigator.of(context).pushReplacementNamed('/login');
+              }
+            },
+          ),
           _buildConnectionBadge(),
         ],
       ),
@@ -454,15 +477,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (_wsService.clientId != null)
+          if (_wsService?.clientId != null)
             Text(
-              'UID:${_wsService.clientId!.split('-').first}',
+              'UID:${_wsService!.clientId!.split('-').first}',
               style: TextStyle(fontSize: 10, color: TacticalColors.textMuted),
             ),
           if (!isConnected) ...[
             const SizedBox(width: 8),
             GestureDetector(
-              onTap: () { _wsService.dispose(); _initWebSocket(); },
+              onTap: () { _wsService?.dispose(); _initWebSocket(); },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(

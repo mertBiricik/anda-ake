@@ -15,7 +15,7 @@ const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 
@@ -45,6 +45,7 @@ let serverStartTime = Date.now();
 const app = express();
 app.use(express.json());
 app.use(cors());
+app.use(express.static('public')); // For Web Admin Panel
 
 // ============================================================
 // Acceptance Test Module (Safety-Critical: Chapter 4)
@@ -161,6 +162,75 @@ app.get('/api/me', authenticateJWT, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, name: true, email: true, role: true, province: true, isActive: true }});
     res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// ============================================================
+// REST API Routes - USERS (User Management)
+// ============================================================
+
+// GET /api/users - List users
+app.get('/api/users', authenticateJWT, async (req, res) => {
+  try {
+    const { role, province } = req.user;
+    let users = [];
+    if (role === 'MERKEZ') {
+      users = await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, province: true, isActive: true } });
+    } else if (role === 'IL_BASKANI' && province) {
+      users = await prisma.user.findMany({ where: { province }, select: { id: true, name: true, email: true, role: true, province: true, isActive: true } });
+    } else {
+      return res.status(403).json({ success: false, error: 'Unauthorized to list users' });
+    }
+    res.json({ success: true, users });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// POST /api/users - Create a new user
+app.post('/api/users', authenticateJWT, async (req, res) => {
+  try {
+    const { role, province } = req.user;
+    const { name, email, password, role: newRole, province: newProv } = req.body;
+
+    if (role === 'RESCUER') return res.status(403).json({ success: false, error: 'Unauthorized' });
+    if (role === 'IL_BASKANI' && (newRole === 'MERKEZ' || newRole === 'IL_BASKANI' || newProv !== province)) {
+      return res.status(403).json({ success: false, error: 'Can only create RESCUER for your own province' });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(400).json({ success: false, error: 'Email already in use' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { name, email, password: hashedPassword, role: newRole || 'RESCUER', province: newProv },
+      select: { id: true, name: true, email: true, role: true, province: true }
+    });
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// DELETE /api/users/:id - Delete a user
+app.delete('/api/users/:id', authenticateJWT, async (req, res) => {
+  try {
+    const { role, province } = req.user;
+    const targetId = req.params.id;
+
+    if (role === 'RESCUER') return res.status(403).json({ success: false, error: 'Unauthorized' });
+
+    const targetUser = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!targetUser) return res.status(404).json({ success: false, error: 'User not found' });
+
+    if (role === 'IL_BASKANI' && targetUser.province !== province) {
+      return res.status(403).json({ success: false, error: 'Unauthorized to delete this user' });
+    }
+
+    await prisma.user.delete({ where: { id: targetId } });
+    res.json({ success: true, message: 'User deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error' });
   }

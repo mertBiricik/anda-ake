@@ -79,14 +79,11 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // Logo & Header
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: TacticalColors.orange.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: TacticalColors.orange.withOpacity(0.3), width: 2),
-                  ),
-                  child: const Icon(Icons.security, color: TacticalColors.orange, size: 64),
+                Image.asset(
+                  'assets/logo.png',
+                  width: 120,
+                  height: 120,
+                  fit: BoxFit.contain,
                 ),
                 const SizedBox(height: 24),
                 const Text(
