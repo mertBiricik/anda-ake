@@ -193,7 +193,7 @@ app.get('/api/users', authenticateJWT, async (req, res) => {
 app.post('/api/users', authenticateJWT, async (req, res) => {
   try {
     const { role, province } = req.user;
-    const { name, email, password, role: newRole, province: newProv } = req.body;
+    const { name, email, password, role: newRole, province: newProv, phone } = req.body;
 
     if (role === 'RESCUER') return res.status(403).json({ success: false, error: 'Unauthorized' });
     if (role === 'IL_BASKANI' && (newRole === 'MERKEZ' || newRole === 'IL_BASKANI' || newProv !== province)) {
@@ -205,8 +205,8 @@ app.post('/api/users', authenticateJWT, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
-      data: { name, email, password: hashedPassword, role: newRole || 'RESCUER', province: newProv },
-      select: { id: true, name: true, email: true, role: true, province: true }
+      data: { name, email, password: hashedPassword, role: newRole || 'RESCUER', province: newProv, phone },
+      select: { id: true, name: true, email: true, role: true, province: true, phone: true }
     });
     res.json({ success: true, user });
   } catch (err) {
@@ -296,6 +296,41 @@ app.post('/api/trigger-alarm', authenticateJWT, async (req, res) => {
     // Store in pending alarms (for polling fallback)
     pendingAlarms.push(alarm);
     if (pendingAlarms.length > MAX_PENDING_ALARMS) pendingAlarms.shift();
+
+    // ==========================================
+    // Netgsm SMS Integration (Safety-Critical)
+    // ==========================================
+    try {
+      const usersToSms = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          phone: { not: null },
+          ...(targetProv ? { province: targetProv } : {})
+        },
+        select: { phone: true }
+      });
+      const phones = usersToSms.map(u => u.phone).filter(p => p.length > 9).join(',');
+      if (phones) {
+        const netgsmUser = process.env.NETGSM_USER || 'test_user';
+        const netgsmPass = process.env.NETGSM_PASS || 'test_pass';
+        const netgsmHeader = process.env.NETGSM_HEADER || 'ANDAKURTAR';
+        const smsMessage = `[ANDA ALARM] ${dbAlarm.title} - ${dbAlarm.body} - ACIL DURUM`;
+        
+        const netgsmUrl = new URL('https://api.netgsm.com.tr/sms/send/get');
+        netgsmUrl.searchParams.append('usercode', netgsmUser);
+        netgsmUrl.searchParams.append('password', netgsmPass);
+        netgsmUrl.searchParams.append('gsmno', phones);
+        netgsmUrl.searchParams.append('message', smsMessage);
+        netgsmUrl.searchParams.append('msgheader', netgsmHeader);
+
+        fetch(netgsmUrl.toString())
+          .then(res => res.text())
+          .then(text => console.log(`[NETGSM] SMS triggered to ${usersToSms.length} users. Response: ${text}`))
+          .catch(err => console.error('[NETGSM] Failed to send SMS:', err));
+      }
+    } catch (err) {
+      console.error('[NETGSM] Error fetching users for SMS:', err);
+    }
 
     // 5. Broadcast to connected WebSocket clients based on Target Province
     let sentCount = 0;

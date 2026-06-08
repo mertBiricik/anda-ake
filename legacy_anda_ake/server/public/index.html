@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANDA AKE - K2 Yönetim Paneli</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Modern Dark SaaS Palette */
+            --bg-color: #0b1120;
+            --surface: #1e293b;
+            --surface-hover: #334155;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            
+            /* Accents */
+            --primary: #3b82f6;      /* Blue */
+            --primary-glow: rgba(59, 130, 246, 0.4);
+            --cyan: #06b6d4;
+            --success: #10b981;      /* Emerald */
+            --danger: #ef4444;       /* Red */
+            --danger-glow: rgba(239, 68, 68, 0.4);
+            --warning: #f59e0b;      /* Amber */
+            
+            --font-family: 'Inter', sans-serif;
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(15, 23, 42, 1) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(30, 58, 138, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(15, 23, 42, 1) 0px, transparent 50%);
+            color: var(--text-main);
+            font-family: var(--font-family);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- Animations --- */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse-danger {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        /* --- Login Screen --- */
+        #login-screen {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        .login-box {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            padding: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .login-box h1 {
+            color: var(--text-main);
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            margin: 0 0 8px 0;
+            background: linear-gradient(135deg, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .login-box p {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            margin-bottom: 32px;
+            text-transform: uppercase;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 14px;
+            border-radius: var(--radius-sm);
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            border: none;
+            color: white;
+            font-family: var(--font-family);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        button:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        /* --- Dashboard --- */
+        #dashboard {
+            display: none;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 16px 32px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        header h2::before {
+            content: '';
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: var(--primary);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--primary);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .logout-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 16px;
+            width: auto;
+            box-shadow: none;
+        }
+
+        .logout-btn:hover {
+            background: var(--surface-hover);
+            border-color: var(--text-muted);
+        }
+
+        .content {
+            display: flex;
+            flex: 1;
+            padding: 32px;
+            gap: 32px;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .panel {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: blur(8px);
+        }
+
+        .panel-header {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .users-panel {
+            flex: 2;
+        }
+
+        .action-panel {
+            flex: 1;
+            min-width: 320px;
+        }
+
+        /* --- Table Styling --- */
+        .table-container {
+            overflow-x: auto;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background: rgba(30, 41, 59, 0.8);
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 16px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            color: var(--text-main);
+        }
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+        /* --- Badges --- */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        .badge.merkez { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+        .badge.il_baskani { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+        .badge.rescuer { background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.2); }
+
+        /* --- Small Buttons --- */
+        .btn-small {
+            padding: 6px 14px;
+            font-size: 12px;
+            width: auto;
+            border-radius: 4px;
+            box-shadow: none;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-small:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-danger {
+            background: transparent;
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+
+        .btn-danger:hover {
+            background: var(--danger);
+            color: white;
+            box-shadow: 0 2px 8px var(--danger-glow);
+        }
+
+        /* --- Alarm Button --- */
+        .alarm-card {
+            margin-top: 32px;
+            background: linear-gradient(145deg, rgba(239, 68, 68, 0.05), rgba(153, 27, 27, 0.1));
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            text-align: center;
+        }
+
+        .alarm-card h3 {
+            color: #fca5a5;
+            margin: 0 0 16px 0;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .alarm-btn {
+            background: var(--danger);
+            color: white;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 18px;
+            box-shadow: 0 4px 15px var(--danger-glow);
+            animation: pulse-danger 2s infinite;
+        }
+
+        .alarm-btn:hover {
+            background: #dc2626;
+            animation: none;
+            transform: scale(1.02);
+        }
+
+        /* --- Forms --- */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        select {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 14px;
+            border-radius: var(--radius-sm);
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+    </style>
+</head>
+<body>
+
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div class="login-box">
+            <h1>ANDA AKE</h1>
+            <p>Sistem Yönetim Paneli</p>
+            <p id="login-error" style="color: var(--danger); display: none; text-transform: none; font-size: 13px; background: rgba(239, 68, 68, 0.1); padding: 10px; border-radius: 4px; border: 1px solid var(--danger);"></p>
+            <input type="email" id="email" placeholder="E-Posta Adresi" />
+            <input type="password" id="password" placeholder="Şifre" />
+            <button onclick="login()">SİSTEME GİRİŞ YAP</button>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard">
+        <header>
+            <h2>ANDA AKE KOMUTA</h2>
+            <div class="user-info">
+                <span id="user-name"></span>
+                <span id="user-role" class="badge merkez"></span>
+                <button class="logout-btn btn-small" onclick="logout()">Oturumu Kapat</button>
+            </div>
+        </header>
+
+        <div class="content">
+            <!-- Users Panel -->
+            <div class="panel users-panel">
+                <div class="panel-header">
+                    <span>Aktif Personel Listesi</span>
+                    <button class="btn-small" onclick="fetchUsers()">Tabloyu Yenile</button>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ad Soyad</th>
+                                <th>E-Posta</th>
+                                <th>Yetki Rolü</th>
+                                <th>Bölge (İl)</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <!-- Users injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Action Panel -->
+            <div class="panel action-panel">
+                <div class="panel-header">Yeni Personel Tanımla</div>
+                <div class="form-group">
+                    <label>İsim Soyisim</label>
+                    <input type="text" id="new-name" placeholder="Örn: Mert Biricik" />
+                </div>
+                <div class="form-group">
+                    <label>E-Posta</label>
+                    <input type="email" id="new-email" placeholder="ornek@anda.com" />
+                </div>
+                <div class="form-group">
+                    <label>Şifre</label>
+                    <input type="password" id="new-password" placeholder="Güçlü bir şifre belirleyin" />
+                </div>
+                <div class="form-group">
+                    <label>Telefon Numarası</label>
+                    <input type="tel" id="new-phone" placeholder="Örn: 5551234567 (Başında 0 olmadan)" />
+                </div>
+                <div class="form-group">
+                    <label>Kullanıcı Rolü</label>
+                    <select id="new-role">
+                        <option value="RESCUER">Saha Personeli (RESCUER)</option>
+                        <option value="IL_BASKANI">İl Başkanı</option>
+                        <option value="MERKEZ">Merkez (Tam Yetki)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Görev Bölgesi (İl)</label>
+                    <input type="text" id="new-province" placeholder="Örn: ISTANBUL" />
+                </div>
+                <button onclick="addUser()" style="margin-top: 8px;">KULLANICIYI OLUŞTUR</button>
+
+                <div class="alarm-card">
+                    <h3>Operasyonel Müdahale</h3>
+                    <button class="alarm-btn" onclick="triggerAlarm()">TÜM BİRLİKLERE ALARM VER</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let jwtToken = localStorage.getItem('jwt_token');
+        let currentUser = null;
+
+        // Init
+        if (jwtToken) {
+            fetchMe();
+        }
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const err = document.getElementById('login-error');
+            const btn = document.querySelector('.login-box button');
+            
+            btn.innerText = 'BAĞLANILIYOR...';
+            btn.style.opacity = '0.7';
+            
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    jwtToken = data.token;
+                    localStorage.setItem('jwt_token', jwtToken);
+                    err.style.display = 'none';
+                    fetchMe();
+                } else {
+                    err.innerText = data.error;
+                    err.style.display = 'block';
+                }
+            } catch (e) {
+                err.innerText = "Sunucuya bağlanılamadı. Lütfen ağınızı kontrol edin.";
+                err.style.display = 'block';
+            } finally {
+                btn.innerText = 'SİSTEME GİRİŞ YAP';
+                btn.style.opacity = '1';
+            }
+        }
+
+        async function fetchMe() {
+            try {
+                const res = await fetch('/api/me', {
+                    headers: { 'Authorization': `Bearer ${jwtToken}` }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    currentUser = data.user;
+                    showDashboard();
+                } else {
+                    logout();
+                }
+            } catch (e) {
+                logout();
+            }
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            
+            document.getElementById('user-name').innerText = currentUser.name;
+            const roleBadge = document.getElementById('user-role');
+            roleBadge.innerText = currentUser.role === 'MERKEZ' ? 'Sistem Yöneticisi' : currentUser.role;
+            roleBadge.className = `badge ${currentUser.role.toLowerCase()}`;
+
+            if (currentUser.role === 'RESCUER') {
+                document.querySelector('.action-panel').style.display = 'none';
+            }
+
+            fetchUsers();
+        }
+
+        function logout() {
+            jwtToken = null;
+            currentUser = null;
+            localStorage.removeItem('jwt_token');
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('email').value = '';
+            document.getElementById('password').value = '';
+        }
+
+        async function fetchUsers() {
+            const tbody = document.getElementById('users-table-body');
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px;">Veriler yükleniyor...</td></tr>';
+            
+            try {
+                const res = await fetch('/api/users', {
+                    headers: { 'Authorization': `Bearer ${jwtToken}` }
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    if (data.users.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px;">Kayıtlı personel bulunamadı.</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = '';
+                    data.users.forEach(u => {
+                        const roleFormat = u.role === 'MERKEZ' ? 'Yönetici' : (u.role === 'IL_BASKANI' ? 'İl Başkanı' : 'Saha Per.');
+                        tbody.innerHTML += `
+                            <tr>
+                                <td style="font-weight: 500;">${u.name}</td>
+                                <td style="color: var(--text-muted);">${u.email}</td>
+                                <td><span class="badge ${u.role.toLowerCase()}">${roleFormat}</span></td>
+                                <td>${u.province || '-'}</td>
+                                <td>
+                                    <button class="btn-small btn-danger" onclick="deleteUser('${u.id}', '${u.name}')">Kaydı Sil</button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger); text-align: center; padding: 30px;">Yetki hatası veya veriye ulaşılamadı.</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px;">Bağlantı hatası.</td></tr>`;
+            }
+        }
+
+        async function addUser() {
+            const name = document.getElementById('new-name').value;
+            const email = document.getElementById('new-email').value;
+            const password = document.getElementById('new-password').value;
+            const phone = document.getElementById('new-phone').value;
+            const role = document.getElementById('new-role').value;
+            const province = document.getElementById('new-province').value;
+
+            if (!name || !email || !password) {
+                alert('Lütfen ad, e-posta ve şifre alanlarını doldurun.');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${jwtToken}`
+                    },
+                    body: JSON.stringify({ name, email, password, phone, role, province })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    // Reset form
+                    document.getElementById('new-name').value = '';
+                    document.getElementById('new-email').value = '';
+                    document.getElementById('new-password').value = '';
+                    document.getElementById('new-phone').value = '';
+                    document.getElementById('new-province').value = '';
+                    
+                    fetchUsers();
+                } else {
+                    alert('Hata: ' + data.error);
+                }
+            } catch (e) {
+                alert('Sunucu ile iletişim kurulamadı.');
+            }
+        }
+
+        async function deleteUser(id, name) {
+            if (!confirm(`"${name}" isimli personeli sistemden kalıcı olarak silmek istediğinize emin misiniz?`)) return;
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${jwtToken}` }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    fetchUsers();
+                } else {
+                    alert('İşlem başarısız: ' + data.error);
+                }
+            } catch (e) {
+                alert('Bağlantı hatası.');
+            }
+        }
+
+        async function triggerAlarm() {
+            if (!confirm("DİKKAT: TÜM BİRLİKLERE KIRMIZI ALARM GÖNDERİLECEKTİR!\n\nBu işlem geri alınamaz. Onaylıyor musunuz?")) return;
+            
+            try {
+                const res = await fetch('/api/trigger-alarm', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${jwtToken}`
+                    },
+                    body: JSON.stringify({
+                        title: 'KIRMIZI ALARM: ACİL İNTİKAL',
+                        body: 'Sistem Yöneticisi tarafından acil toplanma çağrısı yapılmıştır. Uygulamayı kontrol edin.',
+                        priority: 'critical'
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Operasyon Başarılı: Alarm sahadaki cihazlara iletildi.');
+                } else {
+                    alert('İletim Hatası: ' + data.error);
+                }
+            } catch (e) {
+                alert('Ağ hatası nedeniyle alarm komutu gönderilemedi.');
+            }
+        }
+    </script>
+</body>
+</html>

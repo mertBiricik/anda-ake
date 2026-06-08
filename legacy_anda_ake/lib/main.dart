@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config.dart';
@@ -80,11 +81,11 @@ class AndaAkeApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFFF6B35),
+          seedColor: const Color(0xFF3B82F6), // Blue accent
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        fontFamily: 'monospace',
+        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
       ),
       initialRoute: initialRoute ?? '/',
       routes: {
@@ -106,19 +107,19 @@ class AndaAkeApp extends StatelessWidget {
 // Tactical Color Palette
 // ============================================================
 class TacticalColors {
-  static const Color bg = Color(0xFF080C14);
-  static const Color surface = Color(0xFF0F1520);
-  static const Color panel = Color(0xFF141C2B);
-  static const Color border = Color(0xFF1E2D42);
-  static const Color borderActive = Color(0xFF2A4060);
-  static const Color textPrimary = Color(0xFFE8ECF2);
-  static const Color textSecondary = Color(0xFF6B7D95);
-  static const Color textMuted = Color(0xFF3D4F66);
-  static const Color green = Color(0xFF00E676);
-  static const Color amber = Color(0xFFFFC107);
-  static const Color red = Color(0xFFFF1744);
-  static const Color cyan = Color(0xFF64FFDA);
-  static const Color orange = Color(0xFFFF6B35);
+  static const Color bg = Color(0xFF0B1120);
+  static const Color surface = Color(0xFF1E293B);
+  static const Color panel = Color(0xFF0F172A);
+  static const Color border = Color(0xFF334155);
+  static const Color borderActive = Color(0xFF475569);
+  static const Color textPrimary = Color(0xFFF8FAFC);
+  static const Color textSecondary = Color(0xFF94A3B8);
+  static const Color textMuted = Color(0xFF475569);
+  static const Color green = Color(0xFF10B981);
+  static const Color amber = Color(0xFFF59E0B);
+  static const Color red = Color(0xFFEF4444);
+  static const Color cyan = Color(0xFF06B6D4);
+  static const Color orange = Color(0xFF3B82F6); // Reused as Primary Blue
 }
 
 // ============================================================

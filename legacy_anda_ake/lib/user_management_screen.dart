@@ -84,6 +84,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     final nameController = TextEditingController();
     final emailController = TextEditingController();
     final passwordController = TextEditingController();
+    final phoneController = TextEditingController();
     String selectedRole = _userRole == 'MERKEZ' ? 'RESCUER' : 'RESCUER';
     String selectedProvince = _userProvince;
 
@@ -112,6 +113,12 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   obscureText: true,
                   style: const TextStyle(color: TacticalColors.textPrimary),
                   decoration: const InputDecoration(labelText: 'Şifre', labelStyle: TextStyle(color: TacticalColors.textSecondary)),
+                ),
+                TextField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  style: const TextStyle(color: TacticalColors.textPrimary),
+                  decoration: const InputDecoration(labelText: 'Telefon Numarası (5551234567)', labelStyle: TextStyle(color: TacticalColors.textSecondary)),
                 ),
                 if (_userRole == 'MERKEZ') ...[
                   DropdownButtonFormField<String>(
@@ -144,6 +151,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       'name': nameController.text,
                       'email': emailController.text,
                       'password': passwordController.text,
+                      'phone': phoneController.text,
                       'role': selectedRole,
                       'province': selectedProvince,
                     }),
