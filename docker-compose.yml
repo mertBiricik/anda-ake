@@ -1,0 +1,290 @@
+services:
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+    networks:
+      - ottobeeth
+
+  heimdall:
+    image: lscr.io/linuxserver/heimdall:latest
+    container_name: heimdall
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Istanbul
+    volumes:
+      - ./heimdall/config:/config
+    ports:
+      - "85:80"
+      - "449:443"
+    restart: unless-stopped
+    networks:
+      - ottobeeth
+
+  mariadb:
+    image: lscr.io/linuxserver/mariadb:latest
+    container_name: mariadb
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Istanbul
+      - MYSQL_ROOT_PASSWORD=
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=nexcloudsifresi
+    volumes:
+      - ./mariadb/config:/config
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    networks:
+      - ottobeeth
+
+  nextcloud:
+    image: lscr.io/linuxserver/nextcloud:latest
+    container_name: nextcloud
+    depends_on:
+      - mariadb
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Istanbul
+      - MYSQL_HOST=mariadb
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=nexcloudsifresi
+    volumes:
+      - ./nextcloud/config:/config
+      - ./nextcloud/data:/data
+    ports:
+      - "444:443"
+    restart: unless-stopped
+    networks:
+      - ottobeeth
+
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "808:80/tcp"
+      - "434:443/tcp"
+    environment:
+      TZ: 'Europe/Istanbul'
+      FTLCONF_webserver_api_password: '3g6CUC*JYWb6u7'
+      FTLCONF_dns_listeningMode: 'ALL'
+    volumes:
+      - './etc-pihole:/etc/pihole'
+    cap_add:
+      - NET_ADMIN
+      - SYS_TIME
+      - SYS_NICE
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+
+ 
+  openwebrx:
+    image: jketterl/openwebrx:stable
+    container_name: openwebrx
+    ports:
+      - "8073:8073"
+    volumes:
+      - '.openwebrx-settings:/var/lib/openwebrx'
+    devices:
+      - /dev/bus/usb
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./qbittorrent/appdata:/config
+      - ./jellyfin-media/series:/series #optional
+      - ./jellyfin-media/movies:/movies
+    ports:
+      - 8080:8080
+      - 6881:6881
+      - 6881:6881/udp
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      #- JELLYFIN_PublishedServerUrl=jellyfin.biricik #optional
+    volumes:
+      - ./jellyfin/library:/config
+      - ./jellyfin-media/series:/data/tvshows
+      - ./jellyfin-media/movies:/data/movies
+    devices:
+      - /dev/video10:/dev/video10
+      - /dev/video11:/dev/video11
+      - /dev/video12:/dev/video12
+    ports:
+      - 8096:8096
+      - 8920:8920 #optional
+      - 7359:7359/udp #optional
+      - 1900:1900/udp #optional
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+
+  lingarr:
+    image: ghcr.io/lingarr-translate/lingarr:latest # or lingarr/lingarr:latest
+    container_name: lingarr
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_URLS=http://+:9876
+      - DB_CONNECTION=mysql
+      - DB_HOST=lingarr-db
+      - DB_PORT=3306
+      - DB_DATABASE=lingarr
+      - DB_USERNAME=lingarr
+      - DB_PASSWORD=your-password # provide a password
+    ports:
+      - 9876:9876
+    volumes:
+      - ./jellyfin-media/movies:/movies
+      - ./jellyfin-media/series:/tv
+      - ./lingarr/config:/app/config
+    networks:
+      - ottobeeth
+    depends_on:
+      - lingarr-db
+
+  lingarr-db:
+    image: mariadb:latest
+    container_name: lingarr-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_DATABASE=lingarr
+      - MYSQL_USER=lingarr
+      - MYSQL_PASSWORD=your-password # provide a password
+      - MYSQL_ROOT_PASSWORD=your-password # provide a root password
+    volumes:
+      - ./lingarr-db/db:/var/lib/mysql # define a volume to persist the database
+    networks:
+      - ottobeeth
+
+
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:latest
+    container_name: calibre-web
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - DOCKER_MODS=linuxserver/mods:universal-calibre #optional
+      - OAUTHLIB_RELAX_TOKEN_SCOPE=1 #optional
+    volumes:
+      - ./calibre-web/data:/config
+      - ./calibre/library:/books
+    ports:
+      - 8083:8083
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+
+  baikal:
+    image: ckulka/baikal:nginx
+    restart: always
+    ports:
+      - 88:80
+    volumes:
+      - .baikal/config:/var/www/baikal/config
+      - .baikal/data:/var/www/baikal/Specific
+    networks:
+      - ottobeeth
+
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE #optional
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - SERVERURL=wireguard.biricik.de #optional
+      - SERVERPORT=51820 #optional
+      - PEERS=1 #optional
+      - PEERDNS=auto #optional
+      - INTERNAL_SUBNET=10.13.13.0 #optional
+      - ALLOWEDIPS=0.0.0.0/0 #optional
+      - PERSISTENTKEEPALIVE_PEERS= #optional
+      - LOG_CONFS=true #optional
+    volumes:
+      - ./wireguard/config:/config
+      - ./wireguard/lib/modules:/lib/modules #optional
+    ports:
+      - 51820:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+
+  anda-ake:
+    build:
+      context: ./anda-ake/aramakurtarma_ref
+      args:
+        - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    container_name: anda-ake-web
+    environment:
+      - PORT=3000
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      # NetGSM ayarlari
+      - NETGSM_USER=${NETGSM_USER}
+      - NETGSM_PASS=${NETGSM_PASS}
+      - NETGSM_HEADER=${NETGSM_HEADER}
+    ports:
+      - "3000:3000"
+    networks:
+      - ottobeeth
+    restart: unless-stopped
+   
+  anda-db:
+    image: postgres:15-alpine
+    container_name: anda-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=anda
+      - POSTGRES_PASSWORD=anda_secure_pass
+      - POSTGRES_DB=anda_ake
+    volumes:
+      - ./anda-db/data:/var/lib/postgresql/data
+    networks:
+      - ottobeeth
+
+networks:
+  ottobeeth:
+    driver: bridge
+
